@@ -1572,7 +1572,8 @@ export const useSimpleCanvasStore = create<SimpleCanvasStore>((set, get) => ({
     const projectId = useCanvasStore.getState().projectId;
     if (projectId === "proj-pharma-email") {
       useRegulatedContentStore.setState({
-        creatorComplianceFlags: { [elementKey("mh-oncura-email-1", "mh1-body2")]: true },
+        /** Demo handoff flag — must use a body id in `regulatedEmailChromeAnchors` (first or last body per card). */
+        creatorComplianceFlags: { [elementKey("mh-oncura-email-1", "mh1-body")]: true },
       });
     } else {
       useRegulatedContentStore.setState({ creatorComplianceFlags: {} });

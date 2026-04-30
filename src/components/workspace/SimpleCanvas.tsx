@@ -16,6 +16,8 @@ import { useThemeStore } from "@/stores/theme";
 import { useCanvasStore } from "@/stores/canvas";
 import { useRegulatedContentStore, filterClaimsForContext, elementKey } from "@/stores/regulated-content";
 import { regulatedEmailChromeAnchors } from "@/lib/regulated-email-anchors";
+import { scanCardsForCompliance } from "@/lib/compliance-scan";
+import { ComplianceFlagIcon } from "@/components/regulated/ComplianceFlagIcon";
 
 interface SimpleCanvasProps {
   className?: string;
@@ -1150,6 +1152,7 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
                       channel={card.channel}
                       regulatedClaimsAnchor={variantAnchors.claimHintIds.has(element.id)}
                       regulatedFlagAnchor={variantAnchors.flagIds.has(element.id)}
+                      includeComplianceScan={false}
                       onChange={(newContent) => updateVariantElement(card.id, variant.id, element.id, { content: newContent })}
                     />
                   ))}
@@ -1216,6 +1219,8 @@ interface EditableElementProps {
   regulatedClaimsAnchor?: boolean;
   /** When true, show the compliance flag control (regulated email anchors only). */
   regulatedFlagAnchor?: boolean;
+  /** When false, skip scanner hits for badges (e.g. variant preview vs stored card body). */
+  includeComplianceScan?: boolean;
   onChange: (newContent: string) => void;
 }
 
@@ -1226,6 +1231,7 @@ function EditableElement({
   channel,
   regulatedClaimsAnchor = false,
   regulatedFlagAnchor = false,
+  includeComplianceScan = true,
   onChange,
 }: EditableElementProps) {
   const [isEditing, setIsEditing] = useState(false);
@@ -1253,6 +1259,17 @@ function EditableElement({
 
   const isCreatorFlagged = Boolean(creatorFlags[ek]);
   const showRegulatedChrome = regulated && element.type !== "divider" && regulatedClaimsAnchor;
+  const cards = useSimpleCanvasStore((s) => s.cards);
+
+  const hasFlagScanIssue = useMemo(() => {
+    if (!regulated || !regulatedFlagAnchor || !includeComplianceScan) return false;
+    return scanCardsForCompliance(cards, profile, creatorFlags).some(
+      (i) => i.cardId === cardId && i.elementId === element.id,
+    );
+  }, [regulated, regulatedFlagAnchor, includeComplianceScan, cards, profile, creatorFlags, cardId, element.id]);
+
+  const showComplianceFlagBadge =
+    regulated && regulatedFlagAnchor && element.type !== "divider" && (isCreatorFlagged || hasFlagScanIssue);
 
   const { selectedElement, selectElement, clearImageVariations } = useSimpleCanvasStore();
   const compliancePulseKey = useSimpleCanvasStore((s) => s.compliancePulseKey);
@@ -1349,23 +1366,34 @@ function EditableElement({
         showRegulatedChrome && "pl-10",
         regulated &&
           element.type !== "divider" &&
-          (compliancePulseKey === ek || (regulatedFlagAnchor && isCreatorFlagged)) &&
+          (compliancePulseKey === ek ||
+            (regulatedFlagAnchor && (isCreatorFlagged || hasFlagScanIssue))) &&
           "rounded-lg ring-2 ring-amber-500 ring-offset-2 ring-offset-white",
         regulated && element.type !== "divider" && compliancePulseKey === ek && "animate-[pulse_1.1s_ease-in-out_2]",
       )}
     >
-      {showRegulatedChrome && (
-        <>
-          {regulatedClaimsAnchor && suggestionCount > 0 && (
+      {(showComplianceFlagBadge ||
+        (showRegulatedChrome && regulatedClaimsAnchor && suggestionCount > 0)) && (
+        <div className="pointer-events-none absolute -right-0.5 -top-1 z-[30] flex flex-row-reverse items-center gap-1">
+          {showRegulatedChrome && regulatedClaimsAnchor && suggestionCount > 0 && (
             <div
-              className="pointer-events-none absolute -right-0.5 -top-1 z-[30] flex h-[22px] min-w-[22px] items-center justify-center rounded-full bg-indigo-600 px-1 text-[11px] font-bold text-white shadow-md ring-2 ring-white"
+              className="flex h-[22px] min-w-[22px] items-center justify-center rounded-full bg-indigo-600 px-1 text-[11px] font-bold text-white shadow-md ring-2 ring-white"
               title="Claim suggestions for this block — open the inspector to insert approved copy"
               aria-label={`${suggestionCount} regulatory claim suggestions`}
             >
               {suggestionCount > 9 ? "9+" : suggestionCount}
             </div>
           )}
-        </>
+          {showComplianceFlagBadge && (
+            <div
+              className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-amber-600 text-white shadow-md ring-2 ring-white"
+              title="Compliance review — see flags in the inspector"
+              aria-label="Compliance flag on this block"
+            >
+              <ComplianceFlagIcon className="h-3.5 w-3.5" />
+            </div>
+          )}
+        </div>
       )}
       {element.type === "image" && (
         element.isLoading ? (

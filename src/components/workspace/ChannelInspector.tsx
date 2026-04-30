@@ -15,6 +15,7 @@ import { RegulatedContentProfilePanel } from "@/components/regulated/RegulatedCo
 import { scanCardsForCompliance } from "@/lib/compliance-scan";
 import { regulatedEmailChromeAnchors } from "@/lib/regulated-email-anchors";
 import { useRegulatedContentStore, elementKey } from "@/stores/regulated-content";
+import { ComplianceFlagIcon } from "@/components/regulated/ComplianceFlagIcon";
 import { cn } from "@/lib/cn";
 import type { ChannelCard, CardVariant, ContentElement, CardStatus } from "@/types/simple-canvas";
 
@@ -121,11 +122,6 @@ export function ChannelInspector() {
   const groupMenuRef = useRef<HTMLDivElement>(null);
   const [regulatedContentDetailsOpen, setRegulatedContentDetailsOpen] = useState(true);
   const { isPublishing: isPublishingGlobal, publishCards } = usePublishStore();
-
-  useEffect(() => {
-    if (!regulatedCanvas) return;
-    setRegulatedContentDetailsOpen(!selectedElement);
-  }, [regulatedCanvas, selectedElement]);
 
   // Close actions menu on outside click
   useEffect(() => {
@@ -2093,15 +2089,6 @@ function InspectorChevronIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="M6 9l6 6 6-6" />
-    </svg>
-  );
-}
-
-function ComplianceFlagIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-      <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" strokeLinejoin="round" />
-      <line x1="4" y1="22" x2="4" y2="15" strokeLinecap="round" />
     </svg>
   );
 }
