@@ -1,0 +1,1260 @@
+@import "tailwindcss";
+
+/* ============================================
+   SALESFORCE SLDS2 DESIGN SYSTEM
+   Clean, functional, minimal elevation
+   ============================================ */
+
+:root {
+  /* Font Stacks - SLDS Standard */
+  --font-sans: "Salesforce Sans", var(--font-poppins), "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+  --font-mono: ui-monospace, "SF Mono", Monaco, "Cascadia Code", Consolas, monospace;
+  
+  /* SLDS Color Palette */
+  --color-background: #F3F3F3;
+  --color-background-alt: #FFFFFF;
+  --color-background-inverse: #16325C;
+  --color-border: #DDDBDA;
+  --color-border-input: #DDDBDA;
+  --color-border-separator: #E5E5E5;
+  
+  /* Text Colors - SLDS */
+  --color-text-default: #171717;
+  --color-text-weak: #7A7A7A;
+  --color-text-inverse: #FFFFFF;
+  --color-text-link: #0F8EFF;
+  --color-text-link-hover: #014486;
+  
+  /* Brand Colors - SLDS */
+  --color-brand: #0F8EFF;
+  --color-brand-dark: #014486;
+  --color-brand-darker: #032D60;
+  --color-brand-light: #1B96FF;
+  
+  /* Status Colors - SLDS */
+  --color-success: #2E844A;
+  --color-success-light: #45C65A;
+  --color-warning: #DD7A01;
+  --color-warning-light: #FE9339;
+  --color-error: #C23934;
+  --color-error-light: #EA001E;
+  --color-info: #0F8EFF;
+  
+  /* Legacy aliases for compatibility */
+  --background: var(--color-background);
+  --surface: var(--color-background-alt);
+  --surface-elevated: var(--color-background-alt);
+  --border: var(--color-border);
+  --border-subtle: var(--color-border-separator);
+  --text-primary: #171717;
+  --text-secondary: #7A7A7A;
+  --text-muted: #7A7A7A;
+  --accent: var(--color-brand);
+  --accent-hover: var(--color-brand-dark);
+  --sf-blue: var(--color-brand);
+  --sf-blue-dark: var(--color-brand-dark);
+  --success: var(--color-success);
+  --warning: var(--color-warning);
+  --error: var(--color-error);
+  --info: var(--color-info);
+  
+  /* SLDS Shadows - Elevated */
+  --shadow-drop: 0 2px 4px 0 rgba(0, 0, 0, 0.20);
+  --shadow-drop-down: 0 2px 4px 0 rgba(0, 0, 0, 0.20);
+  --shadow-overlay: 0 2px 10px 0 rgba(0, 0, 0, 0.22);
+  
+  /* Legacy shadow aliases */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.08);
+  --shadow-sm: var(--shadow-drop);
+  --shadow-md: var(--shadow-overlay);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.18);
+  --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.22);
+  
+  /* SLDS Border Radius - Conservative */
+  --radius-border: 4px;
+  --radius-container: 4px;
+  --radius-pill: 15rem;
+  
+  /* Legacy radius aliases */
+  --radius-xs: 2px;
+  --radius-sm: var(--radius-border);
+  --radius-md: var(--radius-border);
+  --radius-lg: var(--radius-border);
+  --radius-xl: var(--radius-border);
+  --radius-2xl: var(--radius-border);
+  --radius-full: var(--radius-pill);
+  
+  /* Global Header */
+  --global-header-height: 80px;
+  
+  /* Z-Index Layers */
+  --z-canvas-background: 0;
+  --z-canvas-grid: 1;
+  --z-canvas-connections: 2;
+  --z-canvas-content: 10;
+  --z-canvas-content-hover: 15;
+  --z-canvas-content-selected: 20;
+  --z-canvas-content-dragging: 25;
+  --z-floating-controls: 30;
+  --z-toolbar: 40;
+  --z-sidebar: 50;
+  --z-panel: 60;
+  --z-dropdown: 7000;
+  --z-modal-backdrop: 9000;
+  --z-modal: 9001;
+  --z-overlay: 9002;
+  --z-toast: 10000;
+
+  /* SLDS Animation */
+  --duration-instantly: 0ms;
+  --duration-immediately: 100ms;
+  --duration-quickly: 200ms;
+  --duration-promptly: 300ms;
+  --duration-slowly: 400ms;
+  
+  /* Legacy duration aliases */
+  --duration-instant: var(--duration-immediately);
+  --duration-fast: var(--duration-immediately);
+  --duration-normal: var(--duration-quickly);
+  --duration-slow: var(--duration-promptly);
+  --duration-slower: var(--duration-slowly);
+  
+  /* SLDS Easing */
+  --ease-out: cubic-bezier(0.0, 0.0, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0.0, 1, 1);
+  --ease-in-out: cubic-bezier(0.4, 0.0, 0.2, 1);
+  
+  /* SLDS Spacing Scale (8px base) */
+  --spacing-xx-small: 4px;
+  --spacing-x-small: 8px;
+  --spacing-small: 12px;
+  --spacing-medium: 16px;
+  --spacing-large: 24px;
+  --spacing-x-large: 32px;
+  --spacing-xx-large: 48px;
+  
+  /* Legacy spacing aliases */
+  --space-1: var(--spacing-xx-small);
+  --space-2: var(--spacing-x-small);
+  --space-3: var(--spacing-small);
+  --space-4: var(--spacing-medium);
+  --space-5: 20px;
+  --space-6: var(--spacing-large);
+  --space-8: var(--spacing-x-large);
+  --space-10: 40px;
+  --space-12: var(--spacing-xx-large);
+  --space-16: 64px;
+
+  /* Semantic surface tokens for components */
+  --surface-subtle: #F5F5F5;
+  --surface-active: #EBEBEB;
+  --surface-hover: #F0F0F0;
+  --shadow-panel: 0 2px 10px rgba(0,0,0,0.14);
+  --shadow-dropdown: 0 4px 16px rgba(0,0,0,0.12);
+}
+
+/* ============================================
+   DARK MODE
+   ============================================ */
+
+[data-theme="dark"] {
+  --color-background: #111113;
+  --color-background-alt: #1c1c1e;
+  --color-background-inverse: #F5F5F5;
+  --color-border: #505054;
+  --color-border-input: #505054;
+  --color-border-separator: #434347;
+
+  --color-text-default: #F0F0F0;
+  --color-text-weak: #A0A0A5;
+  --color-text-inverse: #111113;
+  --color-text-link: #4DA6FF;
+  --color-text-link-hover: #80BFFF;
+
+  --color-brand: #4DA6FF;
+  --color-brand-dark: #80BFFF;
+  --color-brand-light: #3399FF;
+
+  --background: #111113;
+  --surface: #1c1c1e;
+  --surface-elevated: #2a2a2c;
+  --surface-subtle: #222224;
+  --surface-active: #333336;
+  --surface-hover: #2a2a2c;
+  --border: #505054;
+  --border-subtle: #434347;
+  --text-primary: #F0F0F0;
+  --text-secondary: rgba(255,255,255,0.72);
+  --text-muted: rgba(255,255,255,0.50);
+  --accent: var(--color-brand);
+  --accent-hover: var(--color-brand-dark);
+
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-sm: 0 2px 4px rgba(0,0,0,0.35);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,0.5);
+  --shadow-xl: 0 16px 48px rgba(0,0,0,0.6);
+  --shadow-panel: 0 2px 10px rgba(0,0,0,0.4);
+  --shadow-dropdown: 0 4px 16px rgba(0,0,0,0.5);
+  --shadow-drop: 0 2px 4px rgba(0,0,0,0.4);
+  --shadow-overlay: 0 2px 10px rgba(0,0,0,0.5);
+}
+
+@theme inline {
+  /* Tailwind color mappings */
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-border: var(--border);
+  --color-border-subtle: var(--border-subtle);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-error: var(--error);
+  --color-info: var(--info);
+  
+  --font-sans: "Salesforce Sans", var(--font-poppins), "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Monaco, "Cascadia Code", Consolas, monospace;
+  
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  
+  --radius-xs: var(--radius-xs);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-2xl);
+  --radius-full: var(--radius-full);
+}
+
+/* ============================================
+   BASE STYLES
+   ============================================ */
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  min-height: 100%;
+  background: var(--background);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+/* ============================================
+   SLDS TYPOGRAPHY SYSTEM
+   Based on Salesforce Lightning Design System
+   ============================================ */
+
+/* SLDS Heading - Large (Page titles) */
+.slds-text-heading_large,
+.text-heading-large {
+  font-family: var(--font-sans);
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+/* SLDS Heading - Medium (Section headers) */
+.slds-text-heading_medium,
+.text-heading-medium {
+  font-family: var(--font-sans);
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+/* SLDS Heading - Small (Card headers, panel titles) */
+.slds-text-heading_small,
+.text-heading-small {
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+/* SLDS Title (Component titles) */
+.slds-text-title,
+.text-title {
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: 0.025em;
+  color: var(--text-secondary);
+}
+
+/* SLDS Title - Caps (Section dividers) */
+.slds-text-title_caps,
+.text-title-caps {
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: 0.0625rem;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* SLDS Body - Regular */
+.slds-text-body_regular,
+.text-body {
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* SLDS Body - Small */
+.slds-text-body_small,
+.text-body-sm {
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* SLDS Label */
+.slds-form-element__label,
+.text-label {
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* Legacy support - map old classes to new SLDS styles */
+.font-display {
+  font-family: var(--font-sans);
+}
+
+.text-h1 {
+  font-family: var(--font-sans);
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+.text-h2 {
+  font-family: var(--font-sans);
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+.text-h3 {
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+.text-h4 {
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+.text-body-lg {
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.text-label-sm {
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.text-caption {
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: 0.0625rem;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.text-ui {
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.text-ui-sm {
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+/* ============================================
+   SCROLLBAR
+   ============================================ */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+/* ============================================
+   FOCUS & SELECTION
+   ============================================ */
+
+:focus-visible {
+  outline: none;
+}
+
+input:focus,
+textarea:focus,
+select:focus,
+button:focus {
+  outline: none;
+}
+
+::selection {
+  background: rgba(0, 161, 224, 0.15);
+}
+
+/* ============================================
+   SLDS UTILITY CLASSES
+   ============================================ */
+
+/* Backgrounds */
+.bg-canvas {
+  background-color: var(--color-background);
+}
+
+/* SLDS Card */
+.slds-card {
+  background: var(--color-background-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-container);
+}
+
+.slds-card__header {
+  padding: var(--spacing-small) var(--spacing-medium);
+  border-bottom: 1px solid var(--color-border-separator);
+}
+
+.slds-card__body {
+  padding: var(--spacing-medium);
+}
+
+/* SLDS Box (container) */
+.slds-box {
+  padding: var(--spacing-medium);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-container);
+  background: var(--color-background-alt);
+}
+
+.slds-box_x-small { padding: var(--spacing-x-small); }
+.slds-box_small { padding: var(--spacing-small); }
+.slds-box_large { padding: var(--spacing-large); }
+
+/* Shimmer Animation */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.shimmer {
+  background: linear-gradient(90deg, #F3F3F3 25%, #E5E5E5 50%, #F3F3F3 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+.shimmer-dark {
+  background: linear-gradient(90deg, rgba(255,255,255,0.02) 25%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.02) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* Skeleton */
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.8; }
+}
+
+.skeleton {
+  animation: pulse 2s ease-in-out infinite;
+  background: #E5E5E5;
+  border-radius: var(--radius-sm);
+}
+
+/* Transitions */
+.transition-fast {
+  transition: all var(--duration-immediately) var(--ease-out);
+}
+
+.transition-normal {
+  transition: all var(--duration-quickly) var(--ease-out);
+}
+
+.transition-slow {
+  transition: all var(--duration-promptly) var(--ease-out);
+}
+
+/* SLDS Surfaces */
+.surface-elevated {
+  background: var(--color-background-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-container);
+}
+
+.surface-elevated-dark {
+  background: var(--color-background-inverse);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-container);
+}
+
+/* Glass effects replaced with solid backgrounds */
+.glass {
+  background: var(--color-background-alt);
+  border: 1px solid var(--color-border);
+}
+
+.glass-dark {
+  background: var(--color-background-inverse);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* ============================================
+   SLDS BUTTON STYLES
+   ============================================ */
+
+.slds-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-x-small);
+  padding: 0 var(--spacing-medium);
+  height: 32px;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1;
+  text-decoration: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-border);
+  cursor: pointer;
+  transition: all var(--duration-immediately) var(--ease-out);
+}
+
+.slds-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Neutral Button */
+.slds-button_neutral {
+  background: var(--color-background-alt);
+  border-color: var(--color-border);
+  color: var(--color-brand);
+}
+
+.slds-button_neutral:hover:not(:disabled) {
+  background: #F3F3F3;
+}
+
+.slds-button_neutral:active:not(:disabled) {
+  background: #E5E5E5;
+}
+
+/* Brand/Primary Button */
+.slds-button_brand {
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+  color: var(--color-text-inverse);
+}
+
+.slds-button_brand:hover:not(:disabled) {
+  background: var(--color-brand-dark);
+  border-color: var(--color-brand-dark);
+}
+
+.slds-button_brand:active:not(:disabled) {
+  background: var(--color-brand-darker);
+  border-color: var(--color-brand-darker);
+}
+
+/* Destructive Button */
+.slds-button_destructive {
+  background: var(--color-error);
+  border-color: var(--color-error);
+  color: var(--color-text-inverse);
+}
+
+.slds-button_destructive:hover:not(:disabled) {
+  background: #A61A14;
+  border-color: #A61A14;
+}
+
+/* Outline Button */
+.slds-button_outline-brand {
+  background: transparent;
+  border-color: var(--color-brand);
+  color: var(--color-brand);
+}
+
+.slds-button_outline-brand:hover:not(:disabled) {
+  background: #F3F3F3;
+}
+
+/* Icon Button */
+.slds-button_icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--color-text-weak);
+}
+
+.slds-button_icon:hover:not(:disabled) {
+  background: #F3F3F3;
+  color: var(--color-brand);
+}
+
+/* Button sizes */
+.slds-button_small {
+  height: 24px;
+  padding: 0 var(--spacing-small);
+  font-size: 13px;
+}
+
+.slds-button_large {
+  height: 40px;
+  padding: 0 var(--spacing-large);
+  font-size: 14px;
+}
+
+/* ============================================
+   SLDS INPUT STYLES
+   ============================================ */
+
+.slds-input {
+  display: block;
+  width: 100%;
+  height: 32px;
+  padding: 0 var(--spacing-small);
+  font-size: 13px;
+  line-height: 32px;
+  color: var(--color-text-default);
+  background: var(--color-background-alt);
+  border: 1px solid var(--color-border-input);
+  border-radius: var(--radius-border);
+  transition: border-color var(--duration-immediately) var(--ease-out),
+              box-shadow var(--duration-immediately) var(--ease-out);
+}
+
+.slds-input::placeholder {
+  color: #939393;
+}
+
+.slds-input:focus {
+  border-color: var(--color-brand);
+  box-shadow: 0 0 3px var(--color-brand);
+  outline: none;
+}
+
+.slds-input:disabled {
+  background: #F3F3F3;
+  cursor: not-allowed;
+}
+
+.slds-input_small {
+  height: 24px;
+  padding: 0 var(--spacing-x-small);
+  font-size: 13px;
+  line-height: 24px;
+}
+
+/* Textarea */
+.slds-textarea {
+  display: block;
+  width: 100%;
+  min-height: 80px;
+  padding: var(--spacing-x-small) var(--spacing-small);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-default);
+  background: var(--color-background-alt);
+  border: 1px solid var(--color-border-input);
+  border-radius: var(--radius-border);
+  resize: vertical;
+  transition: border-color var(--duration-immediately) var(--ease-out),
+              box-shadow var(--duration-immediately) var(--ease-out);
+}
+
+.slds-textarea:focus {
+  border-color: var(--color-brand);
+  box-shadow: 0 0 3px var(--color-brand);
+  outline: none;
+}
+
+/* ============================================
+   SLDS DROPDOWN/MENU STYLES
+   ============================================ */
+
+.slds-dropdown {
+  position: absolute;
+  z-index: var(--z-dropdown);
+  min-width: 120px;
+  padding: var(--spacing-xx-small) 0;
+  background: var(--color-background-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-container);
+  box-shadow: var(--shadow-overlay);
+}
+
+.slds-dropdown__item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-x-small);
+  width: 100%;
+  padding: var(--spacing-x-small) var(--spacing-small);
+  font-size: 13px;
+  color: var(--color-text-default);
+  text-align: left;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background var(--duration-immediately) var(--ease-out);
+}
+
+.slds-dropdown__item:hover {
+  background: #F3F3F3;
+}
+
+.slds-dropdown__item_selected {
+  background: #EBF5FE;
+  color: var(--color-brand);
+}
+
+/* ============================================
+   SLDS BADGE/PILL STYLES
+   ============================================ */
+
+.slds-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px var(--spacing-x-small);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--color-text-default);
+  background: #F3F3F3;
+  border-radius: var(--radius-pill);
+}
+
+.slds-badge_brand {
+  background: #EBF5FE;
+  color: var(--color-brand);
+}
+
+.slds-badge_success {
+  background: #D1FAE5;
+  color: var(--color-success);
+}
+
+.slds-badge_warning {
+  background: #FEF3C7;
+  color: var(--color-warning);
+}
+
+.slds-badge_error {
+  background: #FEE2E2;
+  color: var(--color-error);
+}
+
+/* ============================================
+   CANVAS APP — Premium Style Guide Overrides
+   Applied when the canvas page opens standalone
+   ============================================ */
+
+.canvas-app {
+  /* Font Stacks — Premium */
+  --font-display: "Avant Garde for Salesforce", "Salesforce Sans", var(--font-poppins), "Poppins", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-body: "Salesforce Sans", var(--font-poppins), "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-sans: var(--font-body);
+  --font-header: "Salesforce Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  /* Salesforce Brand */
+  --sf-blue: #00A1E0;
+  --sf-blue-dark: #0078A8;
+  --sf-purple: #6B5ACC;
+
+  /* Status Colors */
+  --success: #10B981;
+  --warning: #F59E0B;
+  --error: #EF4444;
+  --info: #00A1E0;
+
+  /* Border Radius — Generous */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-full: 9999px;
+  --radius-border: 6px;
+  --radius-container: 12px;
+
+  /* Animation — Refined */
+  --duration-instant: 100ms;
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
+  --duration-slow: 300ms;
+  --duration-slower: 400ms;
+
+  /* Easing — Premium */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* Override body text */
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background: var(--background);
+}
+
+/* Canvas light-mode color tokens */
+:root .canvas-app {
+  --background: #FAFAFA;
+  --surface: #FFFFFF;
+  --surface-elevated: #FFFFFF;
+  --surface-subtle: #F5F5F5;
+  --surface-active: #EBEBEB;
+  --surface-hover: #F0F0F0;
+  --border: #D0D0D0;
+  --border-subtle: #E0E0E0;
+  --text-primary: #141414;
+  --text-secondary: #4A4A4A;
+  --text-muted: #767676;
+  --accent: #141414;
+  --accent-hover: #2D2D2D;
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.10), 0 2px 4px rgba(0,0,0,0.06);
+  --shadow-lg: 0 12px 40px rgba(0,0,0,0.14), 0 4px 12px rgba(0,0,0,0.08);
+  --shadow-xl: 0 24px 64px rgba(0,0,0,0.18), 0 8px 24px rgba(0,0,0,0.10);
+  --shadow-glass: 0 8px 32px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04);
+  --shadow-panel: 0 16px 48px rgba(0,0,0,0.16), 0 6px 16px rgba(0,0,0,0.08);
+}
+
+.canvas-app .glass {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.canvas-app .glass-dark {
+  background: rgba(13, 13, 15, 0.9);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.canvas-app .surface-elevated {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.canvas-app .surface-elevated-dark {
+  background: rgba(13, 13, 15, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+
+.canvas-app .bg-canvas {
+  background-image: radial-gradient(circle at 1px 1px, rgba(0, 0, 0, 0.04) 1px, transparent 0);
+  background-size: 24px 24px;
+}
+
+/* Canvas app dark mode overrides — html element bumps specificity above :root .canvas-app */
+html[data-theme="dark"] .canvas-app {
+  --background: #111113;
+  --surface: #2a2a2d;
+  --surface-elevated: #343437;
+  --surface-subtle: #2d2d30;
+  --surface-active: #3e3e42;
+  --surface-hover: #343437;
+  --border: #505054;
+  --border-subtle: #434347;
+  --text-primary: #F0F0F0;
+  --text-secondary: rgba(255,255,255,0.72);
+  --text-muted: rgba(255,255,255,0.50);
+  --accent: #F0F0F0;
+  --accent-hover: #D4D4D4;
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.35);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+  --shadow-lg: 0 12px 40px rgba(0,0,0,0.5);
+  --shadow-xl: 0 24px 64px rgba(0,0,0,0.6);
+  --shadow-glass: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.06);
+  --shadow-panel: 0 16px 48px rgba(0,0,0,0.5), 0 6px 16px rgba(0,0,0,0.3);
+  background: var(--background);
+  color: var(--text-primary);
+}
+
+html[data-theme="dark"] .canvas-app .glass {
+  background: rgba(28, 28, 30, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+html[data-theme="dark"] .canvas-app .surface-elevated {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+html[data-theme="dark"] .canvas-app .bg-canvas {
+  background-image: radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.06) 1px, transparent 0);
+  background-size: 24px 24px;
+}
+
+html[data-theme="dark"] .canvas-app .dark-invert {
+  filter: invert(1) brightness(1.8);
+}
+
+/* Selected row — light blue that adapts to dark mode */
+.canvas-app .selected-row {
+  background: rgba(15, 142, 255, 0.08);
+  color: #0F8EFF;
+}
+html[data-theme="dark"] .canvas-app .selected-row {
+  background: rgba(77, 166, 255, 0.15);
+  color: #4DA6FF;
+}
+
+/* ============================================
+   GRADIENT GLOW — Animated border for processing state
+   ============================================ */
+
+@property --glow-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes glow-spin {
+  0% { --glow-angle: 0deg; }
+  100% { --glow-angle: 360deg; }
+}
+
+/* Agent composer — brand gradient stops at 75% alpha + strong backdrop blur */
+.composer-agent-fill {
+  background-color: transparent;
+  background-image: linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0.26),
+      rgba(255, 255, 255, 0.14)
+    ),
+    linear-gradient(
+      135deg,
+      rgba(219, 234, 254, 0.75) 0%,
+      rgba(237, 233, 254, 0.75) 34%,
+      rgba(252, 231, 243, 0.75) 66%,
+      rgba(224, 231, 255, 0.75) 100%
+    );
+  background-blend-mode: normal;
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  backdrop-filter: blur(24px) saturate(1.5);
+}
+
+/* Home page is always light — override dark theme at component boundary.
+   Uses html prefix to beat html[data-theme="dark"] .canvas-app specificity. */
+html[data-theme="dark"] .force-light,
+html[data-theme="dark"] .force-light .canvas-app {
+  --color-background: #F3F3F3;
+  --color-background-alt: #FFFFFF;
+  --color-background-inverse: #16325C;
+  --color-border: #DDDBDA;
+  --color-border-input: #DDDBDA;
+  --color-border-separator: #E5E5E5;
+  --color-text-default: #171717;
+  --color-text-weak: #7A7A7A;
+  --color-text-inverse: #FFFFFF;
+  --color-text-link: #0F8EFF;
+  --color-text-link-hover: #014486;
+  --color-brand: #0F8EFF;
+  --color-brand-dark: #014486;
+  --color-brand-light: #1B96FF;
+  --background: #FAFAFA;
+  --surface: #FFFFFF;
+  --surface-elevated: #FFFFFF;
+  --surface-subtle: #F5F5F5;
+  --surface-active: #EBEBEB;
+  --surface-hover: #F0F0F0;
+  --border: #D0D0D0;
+  --border-subtle: #E0E0E0;
+  --text-primary: #141414;
+  --text-secondary: #4A4A4A;
+  --text-muted: #767676;
+  --accent: #141414;
+  --accent-hover: #2D2D2D;
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.10), 0 2px 4px rgba(0,0,0,0.06);
+  --shadow-lg: 0 12px 40px rgba(0,0,0,0.14), 0 4px 12px rgba(0,0,0,0.08);
+  --shadow-xl: 0 24px 64px rgba(0,0,0,0.18), 0 8px 24px rgba(0,0,0,0.10);
+  --shadow-glass: 0 8px 32px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04);
+  --shadow-panel: 0 16px 48px rgba(0,0,0,0.16), 0 6px 16px rgba(0,0,0,0.08);
+}
+
+/* Neutralize dark-mode utility classes inside force-light */
+html[data-theme="dark"] .force-light .canvas-app .glass {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+html[data-theme="dark"] .force-light .canvas-app .bg-canvas {
+  background-image: radial-gradient(circle at 1px 1px, rgba(0, 0, 0, 0.04) 1px, transparent 0);
+  background-size: 24px 24px;
+}
+html[data-theme="dark"] .force-light .canvas-app .dark-invert {
+  filter: none;
+}
+
+/* Content cards always render with light colors (real message preview) */
+[data-theme="dark"] .content-card-light {
+  --text-primary: #141414;
+  --text-secondary: #5C5C5C;
+  --text-muted: #7A7A7A;
+  --surface: #FFFFFF;
+  --surface-subtle: #F5F5F5;
+  --surface-active: #EBEBEB;
+  --surface-hover: #F0F0F0;
+  --background: #F3F3F3;
+  --border: #E8E8E8;
+  --border-subtle: #F2F2F2;
+}
+
+[data-theme="dark"] .composer-agent-fill {
+  background-image: linear-gradient(
+      to bottom,
+      rgba(28, 28, 30, 0.68),
+      rgba(28, 28, 30, 0.55)
+    ),
+    linear-gradient(
+      135deg,
+      rgba(59, 80, 130, 0.45) 0%,
+      rgba(75, 60, 120, 0.45) 34%,
+      rgba(110, 55, 90, 0.45) 66%,
+      rgba(60, 70, 130, 0.45) 100%
+    );
+}
+
+/* Static gradient outline — always visible */
+.gradient-border {
+  position: relative;
+}
+
+.gradient-border::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  padding: 2px;
+  background: linear-gradient(
+    135deg,
+    #93c5fd,
+    #c4b5fd,
+    #f9a8d4,
+    #d8b4fe,
+    #a5b4fc,
+    #93c5fd
+  );
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  -webkit-mask-composite: xor;
+  opacity: 0.55;
+  z-index: 0;
+  transition: opacity 0.3s ease, inset 0.3s ease, padding 0.3s ease;
+}
+
+/* Amplified animated glow — processing state */
+.gradient-glow {
+  position: relative;
+}
+
+.gradient-glow::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--glow-angle),
+    #60a5fa,
+    #a78bfa,
+    #f472b6,
+    #c084fc,
+    #818cf8,
+    #60a5fa
+  );
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  -webkit-mask-composite: xor;
+  animation: glow-spin 3s linear infinite;
+  opacity: 1;
+  z-index: 0;
+}
+
+.gradient-glow::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from var(--glow-angle),
+    #60a5fa33,
+    #a78bfa33,
+    #f472b633,
+    #c084fc33,
+    #818cf833,
+    #60a5fa33
+  );
+  filter: blur(12px);
+  animation: glow-spin 3s linear infinite;
+  z-index: -1;
+}
+
+/* ============================================
+   HERO PARTICLES — CSS Houdini ring-particles
+   From https://codepen.io/bramus/pen/bNpoKmy
+   ============================================ */
+
+@property --animation-tick {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+@property --ring-radius {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 100;
+}
+
+@property --ring-x {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 50;
+}
+
+@property --ring-y {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 50;
+}
+
+@property --ring-interactive {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+@keyframes hero-ripple {
+  0% { --animation-tick: 0; }
+  100% { --animation-tick: 1; }
+}
+
+@keyframes hero-ring {
+  0% { --ring-radius: 150; }
+  100% { --ring-radius: 250; }
+}
+
+.hero-particles {
+  background: linear-gradient(135deg, #032D60, #0B5CAD, #1B96FF);
+}
+
+@supports (background: paint(something)) {
+  .hero-particles {
+    --ring-radius: 100;
+    --ring-thickness: 600;
+    --particle-count: 80;
+    --particle-rows: 25;
+    --particle-size: 2;
+    --particle-color: white;
+    --particle-min-alpha: 0.1;
+    --particle-max-alpha: 1.0;
+    --seed: 200;
+
+    background: paint(ring-particles), linear-gradient(135deg, #032D60, #0B5CAD, #1B96FF);
+    animation:
+      hero-ripple 6s linear infinite,
+      hero-ring 6s ease-in-out infinite alternate;
+    transition: --ring-x 3s ease, --ring-y 3s ease;
+  }
+}

@@ -1,0 +1,50 @@
+# Optional: only runs if GitHub Actions is enabled for this repo (Actions tab visible).
+# If your instance only offers Pages from a branch + /(root) or /docs, use instead:
+#   npm run pages:docs
+# then commit and push the generated docs/ folder, and set Pages → fdeandrade → /docs.
+#
+# When Actions works: this pushes ./out to branch gh-pages — set Pages → gh-pages → / (root).
+
+name: Deploy Pages
+
+on:
+  push:
+    branches:
+      - fdeandrade
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install and build
+        env:
+          NEXT_PUBLIC_BASE_PATH: /pages/fdeandrade/agentic-marketing-studio
+          NEXT_STATIC_EXPORT: "1"
+        run: |
+          npm ci
+          npm run build
+          test -f out/index.html
+          touch out/.nojekyll
+          cp out/index.html out/404.html
+
+      - name: Push to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./out
+          force_orphan: true

@@ -1,0 +1,39 @@
+# GitLab / git.soma Pages: publish static Next.js export (out/ → public/)
+# Override NEXT_PUBLIC_BASE_PATH in CI/CD variables if your live URL path differs.
+
+stages:
+  - deploy
+
+image: node:20
+
+variables:
+  NEXT_PUBLIC_BASE_PATH: "/pages/fdeandrade/agentic-marketing-studio"
+  NEXT_STATIC_EXPORT: "1"
+
+cache:
+  key:
+    files:
+      - package-lock.json
+  paths:
+    - node_modules/
+
+# Pages must publish on the branch you actually push to. If CI only ran on a
+# different default branch, no artifact was produced and the site showed README.
+pages:
+  stage: deploy
+  rules:
+    - if: $CI_COMMIT_BRANCH == "fdeandrade"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "master"
+  script:
+    - npm ci
+    - npm run build
+    - rm -rf public
+    - cp -r out public
+    - touch public/.nojekyll
+    - cp public/index.html public/404.html
+    - test -f public/index.html
+  artifacts:
+    paths:
+      - public

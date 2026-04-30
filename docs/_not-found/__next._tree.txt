@@ -1,0 +1,6 @@
+:HL["/pages/fdeandrade/agentic-marketing-studio/_next/static/chunks/15m~i7h7nfs5c.css","style"]
+:HL["/pages/fdeandrade/agentic-marketing-studio/_next/static/chunks/0o_dx6.cpzx6w.css","style"]
+:HL["/pages/fdeandrade/agentic-marketing-studio/fonts/AvantGardeForSalesforce-Regular.woff2","font",{"crossOrigin":"anonymous","type":"font/woff2"}]
+:HL["/pages/fdeandrade/agentic-marketing-studio/fonts/AvantGardeForSalesforce-Medium.woff2","font",{"crossOrigin":"anonymous","type":"font/woff2"}]
+:HL["/pages/fdeandrade/agentic-marketing-studio/fonts/AvantGardeForSalesforce-Bold.woff2","font",{"crossOrigin":"anonymous","type":"font/woff2"}]
+0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"/_not-found","param":null,"prefetchHints":0,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}}}},"staleTime":300,"buildId":"OyNBoovnswWU5eyJFM6u_"}
