@@ -26,6 +26,8 @@ interface SimpleCanvasProps {
 export function SimpleCanvas({ className }: SimpleCanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [isReady, setIsReady] = useState(false);
+  const projectId = useCanvasStore((s) => s.projectId);
+  const stripWorkspaceChrome = projectId === "proj-pharma-email";
 
   const {
     viewport,
@@ -439,7 +441,7 @@ export function SimpleCanvas({ className }: SimpleCanvasProps) {
       )}
 
       {/* Canvas navigation minimap */}
-      <MiniMap />
+      {!stripWorkspaceChrome && <MiniMap />}
 
 
       {/* Generation Console */}

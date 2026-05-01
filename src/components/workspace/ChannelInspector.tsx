@@ -126,16 +126,6 @@ export function ChannelInspector() {
     return rows;
   }, [card, cardComplianceIssues, creatorFlags]);
 
-  const regulatedFlagRowsForSelectedElement = useMemo(() => {
-    if (!element) return [];
-    return regulatedFlagRows.filter((r) => r.elementId === element.id);
-  }, [element, regulatedFlagRows]);
-
-  const regulatedFlagRowsInContentDetails = useMemo(() => {
-    if (!element) return regulatedFlagRows;
-    return regulatedFlagRows.filter((r) => r.elementId !== element.id);
-  }, [element, regulatedFlagRows]);
-
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [showActionsMenu, setShowActionsMenu] = useState(false);
@@ -937,8 +927,8 @@ export function ChannelInspector() {
           </div>
         </div>
 
-        {/* Design / Code toggle — only for email blocks */}
-        {card.channel === "email" && (
+        {/* Design / Code toggle — only for email blocks (hidden on regulated pharma prototype) */}
+        {card.channel === "email" && !regulatedCanvas && (
           <div className="flex items-center gap-0 px-3 py-2 border-b border-[var(--border)] shrink-0">
             {(["design", "code"] as const).map((mode) => {
               const isActive = inspectorMode === mode;
@@ -973,18 +963,22 @@ export function ChannelInspector() {
         )}
 
         {/* Body — SMS always shows design mode since there's no code view */}
-        <div className={cn("flex-1 min-h-0", (card.channel !== "email" || inspectorMode === "design") ? "overflow-y-auto scrollbar-hide" : "flex flex-col")}>
-          {(card.channel !== "email" || inspectorMode === "design") ? (
+        <div className={cn("flex-1 min-h-0", (card.channel !== "email" || inspectorMode === "design" || regulatedCanvas) ? "overflow-y-auto scrollbar-hide" : "flex flex-col")}>
+          {(card.channel !== "email" || inspectorMode === "design" || regulatedCanvas) ? (
             <>
             {regulatedCanvas && !selectedVariantId ? (
             <>
-              {element && regulatedFlagRowsForSelectedElement.length > 0 && (
-                <div className="shrink-0 border-b border-[var(--border)] px-4 pb-3 pt-3">
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-2">
-                    Compliance flags
+              <div className="sticky top-0 z-[5] shrink-0 border-b border-[var(--border)] bg-[var(--surface)] px-4 pb-3 pt-3">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-2">
+                  Compliance flags
+                </p>
+                {regulatedFlagRows.length === 0 ? (
+                  <p className="text-[12px] text-[var(--text-muted)]">
+                    No open issues on intro or closing blocks.
                   </p>
+                ) : (
                   <ul className="space-y-3">
-                    {regulatedFlagRowsForSelectedElement.map((row) => (
+                    {regulatedFlagRows.map((row) => (
                       <li key={row.elementId} className="flex gap-2.5">
                         <button
                           type="button"
@@ -1014,8 +1008,8 @@ export function ChannelInspector() {
                       </li>
                     ))}
                   </ul>
-                </div>
-              )}
+                )}
+              </div>
               {element && (
                 <InlineClaimsSuggestions card={card} element={element} />
               )}
@@ -1031,7 +1025,7 @@ export function ChannelInspector() {
                       Content details
                     </span>
                     <span className="mt-0.5 block truncate text-[11px] text-[var(--text-muted)]">
-                      Status, fields, audience context & compliance flags
+                      Status, fields, audience context
                     </span>
                   </div>
                   <InspectorChevronIcon
@@ -1121,44 +1115,6 @@ export function ChannelInspector() {
                     })()}
                     <div className="px-4 pb-3 pt-2">
                       <RegulatedContentProfilePanel hideHeading />
-                    </div>
-                    <div className="border-t border-[var(--border)] px-4 pb-3 pt-3">
-                      <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-2">Compliance flags</p>
-                      {regulatedFlagRowsInContentDetails.length === 0 ? (
-                        <p className="text-[12px] text-[var(--text-muted)]">No open issues on other intro or closing blocks.</p>
-                      ) : (
-                        <ul className="space-y-3">
-                          {regulatedFlagRowsInContentDetails.map((row) => (
-                            <li key={row.elementId} className="flex gap-2.5">
-                              <button
-                                type="button"
-                                onClick={() => handleJumpToComplianceFlag(row.elementId)}
-                                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border-2 border-amber-500 bg-amber-50 text-amber-800 shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98]"
-                                title="Show this area on the canvas"
-                                aria-label={`Focus canvas on ${row.blockLabel}`}
-                              >
-                                <ComplianceFlagIcon className="h-4 w-4" />
-                              </button>
-                              <div className="min-w-0 flex-1">
-                                <p className="text-[12px] font-semibold text-[var(--text-primary)]">{REGULATED_FLAG_VIOLATION_TITLE}</p>
-                                <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-                                  {row.blockLabel}
-                                </p>
-                                <p className="mt-1 text-[11px] leading-snug text-[var(--text-muted)]">{row.detail}</p>
-                                {row.hasCreator && (
-                                  <button
-                                    type="button"
-                                    className="mt-1.5 text-[11px] font-semibold text-amber-900 underline decoration-amber-400/80 hover:text-amber-950"
-                                    onClick={() => toggleCreatorComplianceFlag(elementKey(card.id, row.elementId))}
-                                  >
-                                    Clear handoff flag
-                                  </button>
-                                )}
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
                     </div>
                   </div>
                 )}

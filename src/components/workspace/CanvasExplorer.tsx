@@ -43,7 +43,18 @@ export function CanvasExplorer({ className, selectedChannelId, onSelectChannel }
   const menuRef = useRef<HTMLDivElement>(null);
   const title = useCanvasStore((s) => s.title);
   const projectId = useCanvasStore((s) => s.projectId);
+  const isPharmaEmailPrototype = projectId === "proj-pharma-email";
+  const explorerPanelTabs = useMemo(
+    () => (isPharmaEmailPrototype ? panelTabs.filter((t) => t.id === "content") : panelTabs),
+    [isPharmaEmailPrototype],
+  );
   const { selectedCardId, selectedCardIds, selectMultipleCards, zoom: zoomFn, fitToContent, resetViewport, cards } = useSimpleCanvasStore();
+
+  useEffect(() => {
+    if (!explorerPanelTabs.some((t) => t.id === activeTab)) {
+      setActiveTab(explorerPanelTabs[0]!.id);
+    }
+  }, [explorerPanelTabs, activeTab]);
 
   useEffect(() => {
     if (projectId !== "proj-pharma-email") return;
@@ -60,12 +71,13 @@ export function CanvasExplorer({ className, selectedChannelId, onSelectChannel }
     return () => document.removeEventListener("mousedown", handler);
   }, [menuOpen]);
 
-  const currentTab = panelTabs.find((t) => t.id === activeTab)!;
+  const currentTab = explorerPanelTabs.find((t) => t.id === activeTab) ?? explorerPanelTabs[0]!;
 
   return (
     <div
       className={cn(
-        "absolute left-2 top-2 bottom-[60px] flex min-w-0 max-w-[300px] flex-col pointer-events-auto",
+        "absolute left-2 top-2 flex min-w-0 max-w-[300px] flex-col pointer-events-auto",
+        isPharmaEmailPrototype ? "bottom-2" : "bottom-[60px]",
         className,
       )}
       style={{
@@ -150,9 +162,9 @@ export function CanvasExplorer({ className, selectedChannelId, onSelectChannel }
               transition={{ duration: 0.15 }}
               className="flex flex-1 min-h-0 border-t border-[var(--border)]"
             >
-              {/* Vertical icon tab rail */}
+              {!isPharmaEmailPrototype && (
               <div className="w-11 flex flex-col items-center py-2 gap-1 border-r border-[var(--border)] flex-shrink-0">
-                {panelTabs.map((tab) => {
+                {explorerPanelTabs.map((tab) => {
                   const isActive = activeTab === tab.id;
                   return (
                     <button
@@ -172,6 +184,7 @@ export function CanvasExplorer({ className, selectedChannelId, onSelectChannel }
                   );
                 })}
               </div>
+              )}
 
               {/* Tab content area */}
               <div className="flex-1 flex flex-col min-w-0 overflow-hidden">

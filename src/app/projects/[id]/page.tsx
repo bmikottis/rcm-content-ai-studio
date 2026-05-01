@@ -32,7 +32,7 @@ export default function CanvasPage({
   const { projects } = useProjectsStore();
   const { generatedCampaign } = useCampaignCreationStore();
   const { addMessage, clearMessages } = useConversationStore();
-  const { viewMode } = usePreviewStore();
+  const { viewMode, setViewMode } = usePreviewStore();
   const { loadWorkspaceData } = useWorkspaceStore();
   const { selectedCardId, selectedCardIds, cards, selectCard } = useSimpleCanvasStore();
   const showContextPanel = useToolsStore((s) => s.showContextPanel);
@@ -171,6 +171,12 @@ export default function CanvasPage({
     }
   }, []);
 
+  const isPharmaEmailPrototype = projectId === "proj-pharma-email";
+
+  useEffect(() => {
+    if (isPharmaEmailPrototype) setViewMode("canvas");
+  }, [isPharmaEmailPrototype, setViewMode]);
+
   return (
     <div className="flex-1 flex flex-col bg-[var(--background)] relative">
       {/* Main row: canvas area + agent panel side-by-side */}
@@ -252,27 +258,31 @@ export default function CanvasPage({
           {/* Top-right: account, Share, Publish */}
           <WorkspaceTopActions />
 
-          {/* Floating header (center mode switch) */}
-          <CanvasHeader />
-
-          {/* Bottom-center: Vibe prompt bar */}
-          <AgentCommandBar />
+          {!isPharmaEmailPrototype && (
+            <>
+              <CanvasHeader />
+              <AgentCommandBar />
+            </>
+          )}
 
           {/* Right panel: channel inspector (canvas only) */}
           {viewMode === "canvas" && <ChannelInspector />}
         </div>
 
-        {/* Agent panel — in the flex flow, pushes canvas to the left */}
-        <AnchoredAgentPanel />
+        {!isPharmaEmailPrototype && <AnchoredAgentPanel />}
       </div>
 
-      {/* Campaign info panel (only in canvas mode) */}
-      {viewMode === "canvas" && campaign && <CampaignInfoPanel campaign={campaign} />}
+      {viewMode === "canvas" && campaign && !isPharmaEmailPrototype && (
+        <CampaignInfoPanel campaign={campaign} />
+      )}
 
-      {/* Overlays */}
-      <VibeEditor />
-      <ApprovalModal />
-      <ApprovalThread />
+      {!isPharmaEmailPrototype && (
+        <>
+          <VibeEditor />
+          <ApprovalModal />
+          <ApprovalThread />
+        </>
+      )}
 
     </div>
   );

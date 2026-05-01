@@ -3,11 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3001",
     "build": "next build",
     "start": "next start",
+    "heroku-postbuild": "npm run build",
     "lint": "eslint",
     "pages:docs": "node scripts/sync-pages-docs.mjs"
+  },
+  "engines": {
+    "node": "20.x"
   },
   "dependencies": {
     "@types/three": "^0.183.1",
