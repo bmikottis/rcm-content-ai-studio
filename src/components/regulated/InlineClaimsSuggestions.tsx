@@ -43,7 +43,12 @@ export function InlineClaimsSuggestions({ card, element }: InlineClaimsSuggestio
 
   const elementIssues = useMemo(() => {
     const all = scanCardsForCompliance(cards, profile, creatorFlags);
-    return all.filter((i) => i.cardId === card.id && i.elementId === element.id);
+    return all.filter(
+      (i) =>
+        i.cardId === card.id &&
+        i.elementId === element.id &&
+        i.ruleId !== "CR-CREATOR-01",
+    );
   }, [cards, profile, creatorFlags, card.id, element.id]);
 
   if (element.type === "divider") return null;

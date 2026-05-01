@@ -12,12 +12,35 @@ import { usePublishStore } from "@/stores/publish";
 import { useCanvasStore } from "@/stores/canvas";
 import { InlineClaimsSuggestions } from "@/components/regulated/InlineClaimsSuggestions";
 import { RegulatedContentProfilePanel } from "@/components/regulated/RegulatedContentProfilePanel";
-import { scanCardsForCompliance } from "@/lib/compliance-scan";
+import { scanCardsForCompliance, type ComplianceIssue } from "@/lib/compliance-scan";
 import { regulatedEmailChromeAnchors } from "@/lib/regulated-email-anchors";
 import { useRegulatedContentStore, elementKey } from "@/stores/regulated-content";
 import { ComplianceFlagIcon } from "@/components/regulated/ComplianceFlagIcon";
 import { cn } from "@/lib/cn";
 import type { ChannelCard, CardVariant, ContentElement, CardStatus } from "@/types/simple-canvas";
+
+const REGULATED_FLAG_VIOLATION_TITLE = "Potential compliance violation";
+
+/** Short copy for the inspector flag row — scanner rule + optional handoff flag. */
+function complianceFlagGuidance(onElement: ComplianceIssue[], hasCreator: boolean): string {
+  const scan = onElement.filter((i) => i.ruleId !== "CR-CREATOR-01");
+  const parts: string[] = [];
+  for (const issue of scan.slice(0, 2)) {
+    const line = issue.hint?.trim()
+      ? `${issue.message.trim()} — ${issue.hint.trim()}`
+      : issue.message.trim();
+    if (line) parts.push(line);
+  }
+  if (hasCreator) {
+    parts.push(
+      "A handoff flag means this section was queued for compliance before MLR: verify claims, citations, and ISI / fair balance, then clear the flag when fixed.",
+    );
+  }
+  return (
+    parts.join(" ") ||
+    "Check this block against your approved claims, label language, and any required safety or disclosure text."
+  );
+}
 
 type CardAction = "rename" | "duplicate" | "createVariant" | "delete";
 type InspectorMode = "design" | "code";
@@ -76,7 +99,7 @@ export function ChannelInspector() {
     const bodies = card.elements.filter((e) => e.type === "body");
     const firstBodyId = bodies[0]?.id;
     const lastBodyId = bodies[bodies.length - 1]?.id;
-    const rows: { elementId: string; blockLabel: string; summary: string; hasCreator: boolean }[] = [];
+    const rows: { elementId: string; blockLabel: string; detail: string; hasCreator: boolean }[] = [];
     for (const elementId of flagIds) {
       const el = card.elements.find((e) => e.id === elementId);
       if (!el) continue;
@@ -96,12 +119,22 @@ export function ChannelInspector() {
       rows.push({
         elementId,
         blockLabel,
-        summary: onElement[0]?.message ?? "Marked for compliance review.",
+        detail: complianceFlagGuidance(onElement, hasCreator),
         hasCreator,
       });
     }
     return rows;
   }, [card, cardComplianceIssues, creatorFlags]);
+
+  const regulatedFlagRowsForSelectedElement = useMemo(() => {
+    if (!element) return [];
+    return regulatedFlagRows.filter((r) => r.elementId === element.id);
+  }, [element, regulatedFlagRows]);
+
+  const regulatedFlagRowsInContentDetails = useMemo(() => {
+    if (!element) return regulatedFlagRows;
+    return regulatedFlagRows.filter((r) => r.elementId !== element.id);
+  }, [element, regulatedFlagRows]);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showAddMenu, setShowAddMenu] = useState(false);
@@ -452,7 +485,11 @@ export function ChannelInspector() {
                   onClick={() => publishCards(unpublished.map((c) => c.id))}
                   className="w-full flex items-center justify-center gap-2 h-9 rounded-lg bg-[#0F8EFF] text-[13px] font-semibold text-white hover:bg-[#0D7DE6] transition-colors disabled:opacity-70"
                 >
-                  Publish{unpublished.length < selectedCards.length ? ` ${unpublished.length}` : " All"}
+                  {regulatedCanvas
+                    ? unpublished.length < selectedCards.length
+                      ? `Submit for review (${unpublished.length})`
+                      : "Submit for review"
+                    : `Publish${unpublished.length < selectedCards.length ? ` ${unpublished.length}` : " All"}`}
                 </button>
               );
             })()}
@@ -636,7 +673,11 @@ export function ChannelInspector() {
                   onClick={() => publishCards(unpublished.map((c) => c.id))}
                   className="w-full flex items-center justify-center gap-2 h-9 rounded-lg bg-[#0F8EFF] text-[13px] font-semibold text-white hover:bg-[#0D7DE6] transition-colors disabled:opacity-70"
                 >
-                  Publish{unpublished.length < selectedCards.length ? ` ${unpublished.length}` : " All"}
+                  {regulatedCanvas
+                    ? unpublished.length < selectedCards.length
+                      ? `Submit for review (${unpublished.length})`
+                      : "Submit for review"
+                    : `Publish${unpublished.length < selectedCards.length ? ` ${unpublished.length}` : " All"}`}
                 </button>
               );
             })()}
@@ -937,6 +978,44 @@ export function ChannelInspector() {
             <>
             {regulatedCanvas && !selectedVariantId ? (
             <>
+              {element && regulatedFlagRowsForSelectedElement.length > 0 && (
+                <div className="shrink-0 border-b border-[var(--border)] px-4 pb-3 pt-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-2">
+                    Compliance flags
+                  </p>
+                  <ul className="space-y-3">
+                    {regulatedFlagRowsForSelectedElement.map((row) => (
+                      <li key={row.elementId} className="flex gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => handleJumpToComplianceFlag(row.elementId)}
+                          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border-2 border-amber-500 bg-amber-50 text-amber-800 shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98]"
+                          title="Show this area on the canvas"
+                          aria-label={`Focus canvas on ${row.blockLabel}`}
+                        >
+                          <ComplianceFlagIcon className="h-4 w-4" />
+                        </button>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[12px] font-semibold text-[var(--text-primary)]">{REGULATED_FLAG_VIOLATION_TITLE}</p>
+                          <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                            {row.blockLabel}
+                          </p>
+                          <p className="mt-1 text-[11px] leading-snug text-[var(--text-muted)]">{row.detail}</p>
+                          {row.hasCreator && (
+                            <button
+                              type="button"
+                              className="mt-1.5 text-[11px] font-semibold text-amber-900 underline decoration-amber-400/80 hover:text-amber-950"
+                              onClick={() => toggleCreatorComplianceFlag(elementKey(card.id, row.elementId))}
+                            >
+                              Clear handoff flag
+                            </button>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {element && (
                 <InlineClaimsSuggestions card={card} element={element} />
               )}
@@ -1045,11 +1124,11 @@ export function ChannelInspector() {
                     </div>
                     <div className="border-t border-[var(--border)] px-4 pb-3 pt-3">
                       <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-2">Compliance flags</p>
-                      {regulatedFlagRows.length === 0 ? (
-                        <p className="text-[12px] text-[var(--text-muted)]">No open issues on intro or closing blocks.</p>
+                      {regulatedFlagRowsInContentDetails.length === 0 ? (
+                        <p className="text-[12px] text-[var(--text-muted)]">No open issues on other intro or closing blocks.</p>
                       ) : (
                         <ul className="space-y-3">
-                          {regulatedFlagRows.map((row) => (
+                          {regulatedFlagRowsInContentDetails.map((row) => (
                             <li key={row.elementId} className="flex gap-2.5">
                               <button
                                 type="button"
@@ -1061,8 +1140,11 @@ export function ChannelInspector() {
                                 <ComplianceFlagIcon className="h-4 w-4" />
                               </button>
                               <div className="min-w-0 flex-1">
-                                <p className="text-[12px] font-semibold text-[var(--text-primary)]">{row.blockLabel}</p>
-                                <p className="mt-0.5 text-[11px] leading-snug text-[var(--text-muted)]">{row.summary}</p>
+                                <p className="text-[12px] font-semibold text-[var(--text-primary)]">{REGULATED_FLAG_VIOLATION_TITLE}</p>
+                                <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                                  {row.blockLabel}
+                                </p>
+                                <p className="mt-1 text-[11px] leading-snug text-[var(--text-muted)]">{row.detail}</p>
                                 {row.hasCreator && (
                                   <button
                                     type="button"
@@ -1302,7 +1384,7 @@ export function ChannelInspector() {
               onClick={() => publishCards([card.id])}
               className="w-full flex items-center justify-center gap-2 h-9 rounded-lg bg-[#0F8EFF] text-[13px] font-semibold text-white hover:bg-[#0D7DE6] transition-colors disabled:opacity-70"
             >
-              Publish
+              {regulatedCanvas ? "Submit for review" : "Publish"}
             </button>
           </div>
         )}
