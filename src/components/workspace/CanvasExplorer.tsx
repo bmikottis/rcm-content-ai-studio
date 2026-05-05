@@ -44,10 +44,7 @@ export function CanvasExplorer({ className, selectedChannelId, onSelectChannel }
   const title = useCanvasStore((s) => s.title);
   const projectId = useCanvasStore((s) => s.projectId);
   const isPharmaEmailPrototype = projectId === "proj-pharma-email";
-  const explorerPanelTabs = useMemo(
-    () => (isPharmaEmailPrototype ? panelTabs.filter((t) => t.id === "content") : panelTabs),
-    [isPharmaEmailPrototype],
-  );
+  const explorerPanelTabs = useMemo(() => panelTabs, []);
   const { selectedCardId, selectedCardIds, selectMultipleCards, zoom: zoomFn, fitToContent, resetViewport, cards } = useSimpleCanvasStore();
 
   useEffect(() => {
@@ -162,7 +159,6 @@ export function CanvasExplorer({ className, selectedChannelId, onSelectChannel }
               transition={{ duration: 0.15 }}
               className="flex flex-1 min-h-0 border-t border-[var(--border)]"
             >
-              {!isPharmaEmailPrototype && (
               <div className="w-11 flex flex-col items-center py-2 gap-1 border-r border-[var(--border)] flex-shrink-0">
                 {explorerPanelTabs.map((tab) => {
                   const isActive = activeTab === tab.id;
@@ -184,7 +180,6 @@ export function CanvasExplorer({ className, selectedChannelId, onSelectChannel }
                   );
                 })}
               </div>
-              )}
 
               {/* Tab content area */}
               <div className="flex-1 flex flex-col min-w-0 overflow-hidden">

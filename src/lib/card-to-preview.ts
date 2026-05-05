@@ -34,7 +34,7 @@ export function cardToContentBlock(card: ChannelCard): ContentBlock {
     image,
     cta: { text: ctaText, url: "#" },
     personalization: [],
-    brandCompliance: card.status === "ready" ? 92 : 72,
+    brandCompliance: card.status === "ready" || card.status === "review" ? 92 : 72,
     generatedAt: new Date(),
     ...(card.channel === "sms" ? { characterCount: body.length } : {}),
   };
@@ -71,7 +71,7 @@ export function variantToContentBlock(card: ChannelCard, variant: CardVariant): 
     image,
     cta: { text: ctaText, url: "#" },
     personalization: [],
-    brandCompliance: variant.status === "ready" ? 92 : 72,
+    brandCompliance: variant.status === "ready" || variant.status === "review" ? 92 : 72,
     generatedAt: new Date(),
     ...(card.channel === "sms" ? { characterCount: body.length } : {}),
   };
@@ -89,7 +89,7 @@ export function buildCardTouchpoints(cards: ChannelCard[]): PreviewTouchpoint[] 
       displayName: card.title,
       position: card.position,
       atomicBlocks: card.elements.map((e) => e.id),
-      status: card.status === "ready" ? "ready" : card.status === "published" ? "approved" : "draft",
+      status: card.status === "ready" || card.status === "review" ? "ready" : card.status === "published" ? "approved" : "draft",
     };
 
     return {

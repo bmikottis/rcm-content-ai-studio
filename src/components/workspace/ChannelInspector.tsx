@@ -146,6 +146,30 @@ export function ChannelInspector() {
   const [regulatedContentDetailsOpen, setRegulatedContentDetailsOpen] = useState(true);
   const { isPublishing: isPublishingGlobal, publishCards } = usePublishStore();
 
+  const submitEmailCardsForReview = useCallback(
+    (ids: string[]) => {
+      if (!regulatedCanvas) {
+        publishCards(ids);
+        return;
+      }
+      const list = ids.filter((id) => {
+        const c = cards.find((x) => x.id === id);
+        return c && c.status !== "published" && c.status !== "review";
+      });
+      if (list.length === 0) {
+        toast.info("Selected content is already in review or published.");
+        return;
+      }
+      for (const id of list) updateCard(id, { status: "review" });
+      toast.success(
+        list.length === 1
+          ? `"${cards.find((c) => c.id === list[0])?.title ?? "Block"}" submitted for review.`
+          : `${list.length} blocks submitted for review.`,
+      );
+    },
+    [regulatedCanvas, cards, updateCard, publishCards],
+  );
+
   // Close actions menu on outside click
   useEffect(() => {
     if (!showActionsMenu) return;
@@ -376,6 +400,7 @@ export function ChannelInspector() {
                 >
                   <option value="draft">Draft</option>
                   <option value="ready">Ready</option>
+                  <option value="review">In review</option>
                   <option value="approved">Approved</option>
                 </select>
               )}
@@ -387,7 +412,15 @@ export function ChannelInspector() {
                     <div className="flex items-center gap-1.5">
                       <div className={cn(
                         "w-2 h-2 rounded-full",
-                        st === "ready" ? "bg-emerald-500" : st === "published" ? "bg-blue-500" : st === "generating" ? "bg-amber-500" : "bg-neutral-300",
+                        st === "ready"
+                          ? "bg-emerald-500"
+                          : st === "review"
+                            ? "bg-violet-500"
+                            : st === "published"
+                              ? "bg-blue-500"
+                              : st === "generating"
+                                ? "bg-amber-500"
+                                : "bg-neutral-300",
                       )} />
                       <span className="text-[13px] text-[var(--text-secondary)] capitalize">{st}</span>
                     </div>
@@ -472,7 +505,7 @@ export function ChannelInspector() {
                 <button
                   type="button"
                   disabled={isPublishingGlobal}
-                  onClick={() => publishCards(unpublished.map((c) => c.id))}
+                  onClick={() => submitEmailCardsForReview(unpublished.map((c) => c.id))}
                   className="w-full flex items-center justify-center gap-2 h-9 rounded-lg bg-[#0F8EFF] text-[13px] font-semibold text-white hover:bg-[#0D7DE6] transition-colors disabled:opacity-70"
                 >
                   {regulatedCanvas
@@ -578,6 +611,7 @@ export function ChannelInspector() {
                 >
                   <option value="draft">Draft</option>
                   <option value="ready">Ready</option>
+                  <option value="review">In review</option>
                   <option value="approved">Approved</option>
                 </select>
               )}
@@ -587,7 +621,15 @@ export function ChannelInspector() {
                     <div className="flex items-center gap-1.5">
                       <div className={cn(
                         "w-2 h-2 rounded-full",
-                        st === "ready" ? "bg-emerald-500" : st === "published" ? "bg-blue-500" : st === "generating" ? "bg-amber-500" : "bg-neutral-300",
+                        st === "ready"
+                          ? "bg-emerald-500"
+                          : st === "review"
+                            ? "bg-violet-500"
+                            : st === "published"
+                              ? "bg-blue-500"
+                              : st === "generating"
+                                ? "bg-amber-500"
+                                : "bg-neutral-300",
                       )} />
                       <span className="text-[13px] text-[var(--text-secondary)] capitalize">{st}</span>
                     </div>
@@ -660,7 +702,7 @@ export function ChannelInspector() {
                 <button
                   type="button"
                   disabled={isPublishingGlobal}
-                  onClick={() => publishCards(unpublished.map((c) => c.id))}
+                  onClick={() => submitEmailCardsForReview(unpublished.map((c) => c.id))}
                   className="w-full flex items-center justify-center gap-2 h-9 rounded-lg bg-[#0F8EFF] text-[13px] font-semibold text-white hover:bg-[#0D7DE6] transition-colors disabled:opacity-70"
                 >
                   {regulatedCanvas
@@ -694,6 +736,8 @@ export function ChannelInspector() {
       );
       updateCard(card.id, { variants: updatedVariants });
     };
+
+    const variantInspectorReadOnly = regulatedCanvas && card.status === "review";
 
     return (
       <AnimatePresence initial={false}>
@@ -733,18 +777,27 @@ export function ChannelInspector() {
             {/* Variant Label */}
             <div className="px-4 py-3 border-b border-[var(--border)]">
               <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-1.5 block">Label</label>
-              <input
-                type="text"
-                value={selectedVariant.label}
-                onChange={(e) => handleVariantLabelChange(e.target.value)}
-                placeholder="Variant label…"
-                className="w-full h-8 px-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[13px] font-medium text-[var(--text-primary)] placeholder:text-neutral-300 outline-none transition-colors focus:border-neutral-400 hover:border-[var(--border)]"
-              />
+              {variantInspectorReadOnly ? (
+                <div className="w-full min-h-8 px-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] text-[13px] font-medium text-[var(--text-primary)]">
+                  {selectedVariant.label}
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  value={selectedVariant.label}
+                  onChange={(e) => handleVariantLabelChange(e.target.value)}
+                  placeholder="Variant label…"
+                  className="w-full h-8 px-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[13px] font-medium text-[var(--text-primary)] placeholder:text-neutral-300 outline-none transition-colors focus:border-neutral-400 hover:border-[var(--border)]"
+                />
+              )}
             </div>
 
             {/* Status */}
             <div className="px-4 py-3 border-b border-[var(--border)]">
               <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-1.5 block">Status</label>
+              {variantInspectorReadOnly ? (
+                <StatusBadge status={selectedVariant.status} size="sm" />
+              ) : (
               <select
                 value={selectedVariant.status}
                 onChange={(e) => handleVariantStatusChange(e.target.value as CardStatus)}
@@ -753,8 +806,10 @@ export function ChannelInspector() {
               >
                 <option value="draft">Draft</option>
                 <option value="ready">Ready</option>
+                <option value="review">In review</option>
                 <option value="approved">Approved</option>
               </select>
+              )}
             </div>
 
             {/* Elements list */}
@@ -767,10 +822,12 @@ export function ChannelInspector() {
               reorderVariantElements={reorderVariantElements}
               selectElement={selectElement}
               selectedElement={selectedElement}
+              readOnly={variantInspectorReadOnly}
             />
           </div>
 
           {/* Delete variant footer */}
+          {!variantInspectorReadOnly && (
           <div className="shrink-0 px-4 py-3 border-t border-[var(--border)]">
             <button
               type="button"
@@ -781,6 +838,7 @@ export function ChannelInspector() {
               Delete Variant
             </button>
           </div>
+          )}
         </motion.div>
       </AnimatePresence>
     );
@@ -829,6 +887,8 @@ export function ChannelInspector() {
     }
   };
 
+  const inspectorReadOnly = regulatedCanvas && card.status === "review";
+
   return (
     <AnimatePresence initial={false}>
       <motion.div
@@ -876,6 +936,7 @@ export function ChannelInspector() {
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
             {/* 3-dot actions menu */}
+            {!inspectorReadOnly && (
             <div ref={actionsRef} className="relative">
               <button
                 type="button"
@@ -915,6 +976,7 @@ export function ChannelInspector() {
                 </div>
               )}
             </div>
+            )}
             {/* Close */}
             <button
               type="button"
@@ -995,7 +1057,7 @@ export function ChannelInspector() {
                             {row.blockLabel}
                           </p>
                           <p className="mt-1 text-[11px] leading-snug text-[var(--text-muted)]">{row.detail}</p>
-                          {row.hasCreator && (
+                          {row.hasCreator && !inspectorReadOnly && (
                             <button
                               type="button"
                               className="mt-1.5 text-[11px] font-semibold text-amber-900 underline decoration-amber-400/80 hover:text-amber-950"
@@ -1011,7 +1073,7 @@ export function ChannelInspector() {
                 )}
               </div>
               {element && (
-                <InlineClaimsSuggestions card={card} element={element} />
+                <InlineClaimsSuggestions card={card} element={element} readOnly={inspectorReadOnly} />
               )}
               <div className="shrink-0 border-b border-[var(--border)]">
                 <button
@@ -1037,6 +1099,53 @@ export function ChannelInspector() {
                 </button>
                 {regulatedContentDetailsOpen && (
                   <div className="border-t border-[var(--border)]">
+                    {inspectorReadOnly ? (
+                      <>
+                        <div className="px-4 py-3 border-b border-[var(--border)]">
+                          <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-1.5 block">Status</label>
+                          <StatusBadge status={card.status} size="sm" />
+                        </div>
+                        <InspectorReadOnlyValue label="Title" value={card.title} />
+                        {card.channel === "email" && (
+                          <InspectorReadOnlyValue label="Subject Line" value={card.subjectLine ?? ""} />
+                        )}
+                        <div className="px-4 py-3 border-b border-[var(--border)]">
+                          <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-1.5 block">Tags</label>
+                          <TagsEditor tags={card.tags ?? []} onChange={() => {}} readOnly allTags={[]} />
+                        </div>
+                        {card.channel === "sms" && (() => {
+                          const bodyEl = card.elements.find((e) => e.type === "body");
+                          const charCount = bodyEl?.content.length ?? 0;
+                          const maxSingle = 160;
+                          const segmentSize = 153;
+                          const segments = charCount === 0 ? 0 : charCount <= maxSingle ? 1 : Math.ceil(charCount / segmentSize);
+                          const ratio = Math.min(charCount / maxSingle, 1);
+                          return (
+                            <div className="px-4 py-3 border-b border-[var(--border)]">
+                              <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-2 block">Character Count</label>
+                              <div className="flex items-center gap-3">
+                                <SmsCharRing ratio={ratio} over={charCount > maxSingle} />
+                                <div>
+                                  <div className="flex items-baseline gap-1">
+                                    <span className={cn("text-[16px] font-bold tabular-nums", charCount > maxSingle ? "text-amber-500" : charCount >= 140 ? "text-orange-500" : "text-[var(--text-primary)]")}>
+                                      {charCount}
+                                    </span>
+                                    <span className="text-[13px] text-[var(--text-muted)]">/ {maxSingle}</span>
+                                  </div>
+                                  <p className="text-[13px] text-[var(--text-muted)] mt-0.5">
+                                    {segments === 0 ? "Empty message" : segments === 1 ? "Single SMS segment" : `${segments} segments (concatenated)`}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                        <div className="px-4 pb-3 pt-2">
+                          <RegulatedContentProfilePanel hideHeading readOnly />
+                        </div>
+                      </>
+                    ) : (
+                    <>
                     <div className="px-4 py-3 border-b border-[var(--border)]">
                       <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-1.5 block">Status</label>
                       {card.status === "published" ? (
@@ -1052,6 +1161,7 @@ export function ChannelInspector() {
                         >
                           <option value="draft">Draft</option>
                           <option value="ready">Ready</option>
+                          <option value="review">In review</option>
                           <option value="approved">Approved</option>
                         </select>
                       )}
@@ -1116,12 +1226,64 @@ export function ChannelInspector() {
                     <div className="px-4 pb-3 pt-2">
                       <RegulatedContentProfilePanel hideHeading />
                     </div>
+                    </>
+                    )}
                   </div>
                 )}
               </div>
             </>
             ) : (
             <>
+              {inspectorReadOnly ? (
+                <>
+                  <div className="px-4 py-3 border-b border-[var(--border)]">
+                    <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-1.5 block">Status</label>
+                    <StatusBadge status={card.status} size="sm" />
+                  </div>
+                  <InspectorReadOnlyValue label="Title" value={card.title} />
+                  {card.channel === "email" && (
+                    <InspectorReadOnlyValue label="Subject Line" value={card.subjectLine ?? ""} />
+                  )}
+                  <div className="px-4 py-3 border-b border-[var(--border)]">
+                    <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-1.5 block">Tags</label>
+                    <TagsEditor tags={card.tags ?? []} onChange={() => {}} readOnly allTags={[]} />
+                  </div>
+                  {card.channel === "sms" && (() => {
+                    const bodyEl = card.elements.find((e) => e.type === "body");
+                    const charCount = bodyEl?.content.length ?? 0;
+                    const maxSingle = 160;
+                    const segmentSize = 153;
+                    const segments = charCount === 0 ? 0 : charCount <= maxSingle ? 1 : Math.ceil(charCount / segmentSize);
+                    const ratio = Math.min(charCount / maxSingle, 1);
+                    return (
+                      <div className="px-4 py-3 border-b border-[var(--border)]">
+                        <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-2 block">Character Count</label>
+                        <div className="flex items-center gap-3">
+                          <SmsCharRing ratio={ratio} over={charCount > maxSingle} />
+                          <div>
+                            <div className="flex items-baseline gap-1">
+                              <span className={cn("text-[16px] font-bold tabular-nums", charCount > maxSingle ? "text-amber-500" : charCount >= 140 ? "text-orange-500" : "text-[var(--text-primary)]")}>
+                                {charCount}
+                              </span>
+                              <span className="text-[13px] text-[var(--text-muted)]">/ {maxSingle}</span>
+                            </div>
+                            <p className="text-[13px] text-[var(--text-muted)] mt-0.5">
+                              {segments === 0 ? "Empty message" : segments === 1 ? "Single SMS segment" : `${segments} segments (concatenated)`}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  <div className="px-4 pb-3 pt-2">
+                    <RegulatedContentProfilePanel hideHeading readOnly />
+                  </div>
+                  {regulatedCanvas && element && (
+                    <InlineClaimsSuggestions card={card} element={element} readOnly />
+                  )}
+                </>
+              ) : (
+                <>
               <div className="px-4 py-3 border-b border-[var(--border)]">
                 <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-1.5 block">Status</label>
                 {card.status === "published" ? (
@@ -1137,6 +1299,7 @@ export function ChannelInspector() {
                   >
                     <option value="draft">Draft</option>
                     <option value="ready">Ready</option>
+                    <option value="review">In review</option>
                     <option value="approved">Approved</option>
                   </select>
                 )}
@@ -1203,6 +1366,8 @@ export function ChannelInspector() {
               {regulatedCanvas && element && (
                 <InlineClaimsSuggestions card={card} element={element} />
               )}
+                </>
+              )}
             </>
             )}
 
@@ -1210,6 +1375,7 @@ export function ChannelInspector() {
               <div className="px-4 py-3">
                 <div className="flex items-center justify-between mb-2">
                   <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)]">Assets</label>
+                  {!inspectorReadOnly && (
                   <div className="relative">
                     <button
                       type="button"
@@ -1235,6 +1401,7 @@ export function ChannelInspector() {
                       </div>
                     )}
                   </div>
+                  )}
                 </div>
                 {card.elements.length === 0 ? (
                   <p className="text-[13px] text-[var(--text-muted)] py-3 text-center">No elements yet</p>
@@ -1245,11 +1412,11 @@ export function ChannelInspector() {
                       return (
                         <div
                           key={el.id}
-                          draggable
-                          onDragStart={() => { dragItem.current = idx; }}
-                          onDragEnter={() => { dragOverItem.current = idx; }}
-                          onDragEnd={handleReorder}
-                          onDragOver={(e) => e.preventDefault()}
+                          draggable={!inspectorReadOnly}
+                          onDragStart={inspectorReadOnly ? undefined : () => { dragItem.current = idx; }}
+                          onDragEnter={inspectorReadOnly ? undefined : () => { dragOverItem.current = idx; }}
+                          onDragEnd={inspectorReadOnly ? undefined : handleReorder}
+                          onDragOver={inspectorReadOnly ? undefined : (e) => e.preventDefault()}
                           onClick={() => selectElement(card.id, el.id)}
                           className={cn(
                             "group flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors",
@@ -1257,12 +1424,15 @@ export function ChannelInspector() {
                           )}
                         >
                           <div className="relative flex-shrink-0 w-4 h-4 flex items-center justify-center">
-                            <ContentTypeIcon type={el.type} size="sm" className="group-hover:opacity-0 transition-opacity" />
+                            <ContentTypeIcon type={el.type} size="sm" className={cn(!inspectorReadOnly && "group-hover:opacity-0 transition-opacity")} />
+                            {!inspectorReadOnly && (
                             <GripIcon className="w-4 h-4 text-[var(--text-primary)] absolute inset-0 cursor-grab opacity-0 group-hover:opacity-100 transition-opacity" />
+                            )}
                           </div>
                           <span className={cn("text-[13px] font-medium truncate flex-1 min-w-0", isActive ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]")}>
                             {ELEMENT_TYPES.find((t) => t.type === el.type)?.label ?? el.type}
                           </span>
+                          {!inspectorReadOnly && (
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); handleRemoveElement(el.id); }}
@@ -1271,6 +1441,7 @@ export function ChannelInspector() {
                           >
                             <TrashIcon className="w-3 h-3" />
                           </button>
+                          )}
                           <ElementLinkButton cardId={card.id} elementType={el.type} cards={cards} />
                         </div>
                       );
@@ -1308,6 +1479,7 @@ export function ChannelInspector() {
                         >
                           <span className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", isActive ? "bg-[#0F8EFF]" : "bg-neutral-300")} />
                           <span className="truncate flex-1">{v.label}</span>
+                          {!inspectorReadOnly && (
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); removeVariant(card.id, v.id); if (isActive) selectVariant(card.id, null); }}
@@ -1316,6 +1488,7 @@ export function ChannelInspector() {
                           >
                             <TrashIcon className="w-3 h-3" />
                           </button>
+                          )}
                           <StatusBadge status={v.status} size="xs" />
                         </div>
                       );
@@ -1334,14 +1507,20 @@ export function ChannelInspector() {
         {/* Sticky publish footer — email only */}
         {card.channel === "email" && card.status !== "published" && (
           <div className="shrink-0 px-4 py-3 border-t border-[var(--border)] bg-[var(--surface)]">
-            <button
-              type="button"
-              disabled={isPublishingGlobal}
-              onClick={() => publishCards([card.id])}
-              className="w-full flex items-center justify-center gap-2 h-9 rounded-lg bg-[#0F8EFF] text-[13px] font-semibold text-white hover:bg-[#0D7DE6] transition-colors disabled:opacity-70"
-            >
-              {regulatedCanvas ? "Submit for review" : "Publish"}
-            </button>
+            {regulatedCanvas && card.status === "review" ? (
+              <p className="text-center text-[12px] leading-snug text-[var(--text-muted)]">
+                This content is locked while it is in review.
+              </p>
+            ) : (
+              <button
+                type="button"
+                disabled={isPublishingGlobal}
+                onClick={() => submitEmailCardsForReview([card.id])}
+                className="w-full flex items-center justify-center gap-2 h-9 rounded-lg bg-[#0F8EFF] text-[13px] font-semibold text-white hover:bg-[#0D7DE6] transition-colors disabled:opacity-70"
+              >
+                {regulatedCanvas ? "Submit for review" : "Publish"}
+              </button>
+            )}
           </div>
         )}
       </motion.div>
@@ -1590,7 +1769,28 @@ function SmsCharRing({ ratio, over }: { ratio: number; over: boolean }) {
 
 /* ── Tags Editor ── */
 
-function TagsEditor({ tags, onChange, allTags = [] }: { tags: string[]; onChange: (tags: string[]) => void; allTags?: string[] }) {
+function InspectorReadOnlyValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="px-4 py-3 border-b border-[var(--border)]">
+      <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-1.5 block">{label}</label>
+      <div className="w-full min-h-8 px-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] text-[13px] font-medium text-[var(--text-primary)] whitespace-pre-wrap">
+        {value.trim() ? value : "—"}
+      </div>
+    </div>
+  );
+}
+
+function TagsEditor({
+  tags,
+  onChange,
+  allTags = [],
+  readOnly = false,
+}: {
+  tags: string[];
+  onChange: (tags: string[]) => void;
+  allTags?: string[];
+  readOnly?: boolean;
+}) {
   const [input, setInput] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -1641,6 +1841,25 @@ function TagsEditor({ tags, onChange, allTags = [] }: { tags: string[]; onChange
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
+
+  if (readOnly) {
+    return (
+      <div className="flex flex-wrap gap-1.5 min-h-8">
+        {tags.length === 0 ? (
+          <span className="text-[13px] text-[var(--text-muted)]">—</span>
+        ) : (
+          tags.map((tag) => (
+            <span
+              key={tag}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--surface-active)] text-[13px] font-medium text-[var(--text-secondary)]"
+            >
+              {tag}
+            </span>
+          ))
+        )}
+      </div>
+    );
+  }
 
   return (
     <div ref={wrapperRef}>
@@ -2013,6 +2232,7 @@ function VariantElementsList({
   reorderVariantElements,
   selectElement,
   selectedElement,
+  readOnly = false,
 }: {
   card: ChannelCard;
   variant: CardVariant;
@@ -2022,6 +2242,7 @@ function VariantElementsList({
   reorderVariantElements: (cardId: string, variantId: string, elements: ContentElement[]) => void;
   selectElement: (cardId: string, elementId: string) => void;
   selectedElement: { cardId: string; elementId: string } | null;
+  readOnly?: boolean;
 }) {
   const [showAddMenu, setShowAddMenu] = useState(false);
   const dragItem = useRef<number | null>(null);
@@ -2050,6 +2271,7 @@ function VariantElementsList({
     <div className="px-4 py-3">
       <div className="flex items-center justify-between mb-2">
         <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)]">Assets</label>
+        {!readOnly && (
         <div className="relative">
           <button
             type="button"
@@ -2075,6 +2297,7 @@ function VariantElementsList({
             </div>
           )}
         </div>
+        )}
       </div>
       {variant.elements.length === 0 ? (
         <p className="text-[13px] text-[var(--text-muted)] py-3 text-center">No elements yet</p>
@@ -2085,11 +2308,11 @@ function VariantElementsList({
             return (
               <div
                 key={el.id}
-                draggable
-                onDragStart={() => { dragItem.current = idx; }}
-                onDragEnter={() => { dragOverItem.current = idx; }}
-                onDragEnd={handleReorder}
-                onDragOver={(e) => e.preventDefault()}
+                draggable={!readOnly}
+                onDragStart={readOnly ? undefined : () => { dragItem.current = idx; }}
+                onDragEnter={readOnly ? undefined : () => { dragOverItem.current = idx; }}
+                onDragEnd={readOnly ? undefined : handleReorder}
+                onDragOver={readOnly ? undefined : (e) => e.preventDefault()}
                 onClick={() => selectElement(card.id, el.id)}
                 className={cn(
                   "group flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors",
@@ -2097,12 +2320,15 @@ function VariantElementsList({
                 )}
               >
                 <div className="relative flex-shrink-0 w-4 h-4 flex items-center justify-center">
-                  <ContentTypeIcon type={el.type} size="sm" className="group-hover:opacity-0 transition-opacity" />
+                  <ContentTypeIcon type={el.type} size="sm" className={cn(!readOnly && "group-hover:opacity-0 transition-opacity")} />
+                  {!readOnly && (
                   <GripIcon className="w-4 h-4 text-[var(--text-primary)] absolute inset-0 cursor-grab opacity-0 group-hover:opacity-100 transition-opacity" />
+                  )}
                 </div>
                 <span className={cn("text-[13px] font-medium truncate flex-1 min-w-0", isActive ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]")}>
                   {ELEMENT_TYPES.find((t) => t.type === el.type)?.label ?? el.type}
                 </span>
+                {!readOnly && (
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); removeVariantElement(card.id, variant.id, el.id); }}
@@ -2111,6 +2337,7 @@ function VariantElementsList({
                 >
                   <TrashIcon className="w-3 h-3" />
                 </button>
+                )}
                 <ElementLinkButton cardId={card.id} elementType={el.type} cards={cards} />
               </div>
             );

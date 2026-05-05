@@ -1,16 +1,18 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useSimpleCanvasStore } from "@/stores/simple-canvas";
 import { useCanvasStore } from "@/stores/canvas";
 import { useRegulatedContentStore } from "@/stores/regulated-content";
 import { scanCardsForCompliance, complianceSummary, type ComplianceIssue } from "@/lib/compliance-scan";
 import { cn } from "@/lib/cn";
+import { toast } from "@/stores/toast";
 
 /** Compliance summary + issue list for the left explorer (pharma only). */
 export function ExplorerComplianceBar() {
   const projectId = useCanvasStore((s) => s.projectId);
   const cards = useSimpleCanvasStore((s) => s.cards);
+  const updateCard = useSimpleCanvasStore((s) => s.updateCard);
   const profile = useRegulatedContentStore((s) => s.profile);
   const creatorFlags = useRegulatedContentStore((s) => s.creatorComplianceFlags);
   const [expanded, setExpanded] = useState(false);
@@ -20,6 +22,23 @@ export function ExplorerComplianceBar() {
     [cards, profile, creatorFlags],
   );
   const summary = useMemo(() => complianceSummary(issues), [issues]);
+
+  const handleSubmitAllForReview = useCallback(() => {
+    const emailCards = cards.filter((c) => c.channel === "email");
+    const toAdvance = emailCards.filter(
+      (c) => c.status === "draft" || c.status === "generating" || c.status === "ready",
+    );
+    if (toAdvance.length === 0) {
+      toast.info("No email blocks to submit. In-review, approved, or published content is unchanged.");
+      return;
+    }
+    for (const c of toAdvance) {
+      updateCard(c.id, { status: "review" });
+    }
+    toast.success(
+      `${toAdvance.length} email block${toAdvance.length === 1 ? "" : "s"} submitted for review.`,
+    );
+  }, [cards, updateCard]);
 
   if (projectId !== "proj-pharma-email") return null;
 
@@ -45,6 +64,13 @@ export function ExplorerComplianceBar() {
             : `${summary.errors} error${summary.errors === 1 ? "" : "s"} · ${summary.warnings} warning${summary.warnings === 1 ? "" : "s"}`}
         </span>
         <ChevronIcon className={cn("h-3.5 w-3.5 shrink-0 transition-transform", expanded && "rotate-180")} />
+      </button>
+      <button
+        type="button"
+        onClick={handleSubmitAllForReview}
+        className="mt-1.5 flex w-full items-center justify-center rounded-lg bg-[#0F8EFF] px-2.5 py-2 text-[11px] font-semibold text-white shadow-sm transition-colors hover:bg-[#0D7DE6] active:scale-[0.99]"
+      >
+        Submit all content for review
       </button>
       <p className="mt-1.5 text-[9px] leading-relaxed text-[var(--text-muted)]">
         <span className="inline-flex items-center gap-0.5">

@@ -16,7 +16,7 @@ export interface Viewport {
 
 export type ChannelType = "email" | "sms";
 
-export type CardStatus = "draft" | "generating" | "ready" | "approved" | "published";
+export type CardStatus = "draft" | "generating" | "ready" | "review" | "approved" | "published";
 
 export type ImageFit = "cover" | "contain";
 

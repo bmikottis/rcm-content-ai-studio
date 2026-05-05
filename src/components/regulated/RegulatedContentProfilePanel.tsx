@@ -32,12 +32,23 @@ function ProfileSelect<T extends string>({
   value,
   options,
   onChange,
+  readOnly,
 }: {
   label: string;
   value: T;
   options: { value: T; label: string }[];
   onChange: (v: T) => void;
+  readOnly?: boolean;
 }) {
+  const display = options.find((o) => o.value === value)?.label ?? value;
+  if (readOnly) {
+    return (
+      <div className="flex flex-col gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] px-2.5 py-2">
+        <span className="text-[9px] font-bold uppercase tracking-wide text-[var(--text-muted)]">{label}</span>
+        <span className="text-[12px] font-semibold text-[var(--text-primary)]">{display}</span>
+      </div>
+    );
+  }
   return (
     <label className="flex flex-col gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface-elevated)] px-2.5 py-2">
       <span className="text-[9px] font-bold uppercase tracking-wide text-[var(--text-muted)]">{label}</span>
@@ -59,10 +70,12 @@ function ProfileSelect<T extends string>({
 export function RegulatedContentProfilePanel({
   className,
   hideHeading = false,
+  readOnly = false,
 }: {
   className?: string;
   /** When nested under another section title (e.g. Content details). */
   hideHeading?: boolean;
+  readOnly?: boolean;
 }) {
   const profile = useRegulatedContentStore((s) => s.profile);
   const setProfile = useRegulatedContentStore((s) => s.setProfile);
@@ -76,24 +89,28 @@ export function RegulatedContentProfilePanel({
         label="Format"
         value={profile.contentType}
         options={[...REGULATED_PROFILE_OPTIONS.contentType]}
+        readOnly={readOnly}
         onChange={(v) => setProfile({ contentType: v as typeof profile.contentType })}
       />
       <ProfileSelect
         label="Audience"
         value={profile.audience}
         options={[...REGULATED_PROFILE_OPTIONS.audience]}
+        readOnly={readOnly}
         onChange={(v) => setProfile({ audience: v as typeof profile.audience })}
       />
       <ProfileSelect
         label="Region"
         value={profile.region}
         options={[...REGULATED_PROFILE_OPTIONS.region]}
+        readOnly={readOnly}
         onChange={(v) => setProfile({ region: v as typeof profile.region })}
       />
       <ProfileSelect
         label="Intent"
         value={profile.intent}
         options={[...REGULATED_PROFILE_OPTIONS.intent]}
+        readOnly={readOnly}
         onChange={(v) => setProfile({ intent: v as typeof profile.intent })}
       />
     </div>

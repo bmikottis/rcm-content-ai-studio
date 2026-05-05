@@ -15,9 +15,11 @@ import { cn } from "@/lib/cn";
 interface InlineClaimsSuggestionsProps {
   card: ChannelCard;
   element: ContentElement;
+  /** When true, suggestions are shown but Insert / Dismiss are hidden. */
+  readOnly?: boolean;
 }
 
-export function InlineClaimsSuggestions({ card, element }: InlineClaimsSuggestionsProps) {
+export function InlineClaimsSuggestions({ card, element, readOnly = false }: InlineClaimsSuggestionsProps) {
   const profile = useRegulatedContentStore((s) => s.profile);
   const dismissedByElement = useRegulatedContentStore((s) => s.dismissedByElement);
   const creatorFlags = useRegulatedContentStore((s) => s.creatorComplianceFlags);
@@ -101,22 +103,24 @@ export function InlineClaimsSuggestions({ card, element }: InlineClaimsSuggestio
                 </div>
               </div>
               <p className="mt-1 text-[12px] leading-snug text-[var(--text-secondary)]">{claim.body}</p>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => applyClaim(updateElement, card.id, element, claim)}
-                  className="rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-700"
-                >
-                  Insert into block
-                </button>
-                <button
-                  type="button"
-                  onClick={() => dismissClaim(key, claim.id)}
-                  className="rounded-md border border-[var(--border)] bg-white px-2.5 py-1 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"
-                >
-                  Dismiss
-                </button>
-              </div>
+              {!readOnly && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => applyClaim(updateElement, card.id, element, claim)}
+                    className="rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-700"
+                  >
+                    Insert into block
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => dismissClaim(key, claim.id)}
+                    className="rounded-md border border-[var(--border)] bg-white px-2.5 py-1 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              )}
             </li>
           ))}
         </ul>

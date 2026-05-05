@@ -757,6 +757,8 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
   const isEmail = card.channel === "email";
   const channelBgColor = (isDark && !isEmail) ? channelBgColorDark : channelBgColorLight;
   const isCardGenerating = card.status === "generating";
+  const stripWorkspaceChrome = projectId === "proj-pharma-email";
+  const isLockedInReview = stripWorkspaceChrome && card.status === "review";
   const isLazySkeleton =
     isCardGenerating &&
     card.elements.length > 0 &&
@@ -944,6 +946,7 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
   }, [card.id, updateElement]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (projectId === "proj-pharma-email" && card.status === "review") return;
     if (!e.dataTransfer.types.includes("application/x-asset-element")) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
@@ -967,7 +970,7 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
       }
       setDropIndex(idx);
     }
-  }, []);
+  }, [projectId, card.status]);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     if (dragRef.current && !dragRef.current.contains(e.relatedTarget as Node)) {
@@ -978,6 +981,7 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
   }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
+    if (projectId === "proj-pharma-email" && card.status === "review") return;
     e.preventDefault();
     setIsDropTarget(false);
     setDropRejected(false);
@@ -1010,7 +1014,7 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
         addElement(card.id, newElement);
       }
     } catch { /* ignore malformed data */ }
-  }, [card.id, card.channel, addElement, insertElement, dropIndex]);
+  }, [card.id, card.channel, card.status, projectId, addElement, insertElement, dropIndex]);
 
   return (
     <motion.div
@@ -1039,6 +1043,8 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
             ? "border-red-400 shadow-[0_0_0_2px_rgba(239,68,68,0.15)]"
             : isDropTarget
             ? "border-emerald-400 shadow-[0_0_0_2px_rgba(16,185,129,0.15)]"
+            : isLockedInReview
+            ? "border-amber-400/90 bg-neutral-50/90 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.4)] ring-1 ring-amber-300/50"
             : isSelected && selectedVariantId
             ? "border-[#B3DEFF] shadow-[0_0_0_2px_rgba(1,118,211,0.06)]"
             : isSelected
@@ -1091,6 +1097,7 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
                     element={element}
                     index={i}
                     channel={card.channel}
+                    readOnly={isLockedInReview}
                     regulatedClaimsAnchor={regulatedEmailAnchors.claimHintIds.has(element.id)}
                     regulatedFlagAnchor={regulatedEmailAnchors.flagIds.has(element.id)}
                     onChange={(newContent) => handleElementChange(element.id, newContent)}
@@ -1181,6 +1188,7 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
                   </div>
                   <div className="flex items-center gap-1.5">
                     <StatusBadge status={variant.status} />
+                    {!isLockedInReview && (
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); removeVariant(card.id, variant.id); }}
@@ -1189,6 +1197,7 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
                     >
                       <TrashIcon className="w-3.5 h-3.5 text-[var(--text-muted)]" />
                     </button>
+                    )}
                   </div>
                 </div>
                 {/* Variant content */}
@@ -1200,6 +1209,7 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
                       element={element}
                       index={ei}
                       channel={card.channel}
+                      readOnly={isLockedInReview}
                       regulatedClaimsAnchor={variantAnchors.claimHintIds.has(element.id)}
                       regulatedFlagAnchor={variantAnchors.flagIds.has(element.id)}
                       includeComplianceScan={false}
@@ -1213,6 +1223,7 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
 
             {/* Variant actions footer */}
             <div className="mt-2 flex items-center gap-2">
+              {!isLockedInReview && (
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); addVariant(card.id); }}
@@ -1220,6 +1231,7 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
               >
                 + add variant
               </button>
+              )}
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setVariantsExpanded(false); }}
@@ -1311,6 +1323,8 @@ interface EditableElementProps {
   regulatedFlagAnchor?: boolean;
   /** When false, skip scanner hits for badges (e.g. variant preview vs stored card body). */
   includeComplianceScan?: boolean;
+  /** When true, selecting still works but inline editing is disabled (e.g. content in regulatory review). */
+  readOnly?: boolean;
   onChange: (newContent: string) => void;
 }
 
@@ -1322,6 +1336,7 @@ function EditableElement({
   regulatedClaimsAnchor = false,
   regulatedFlagAnchor = false,
   includeComplianceScan = true,
+  readOnly = false,
   onChange,
 }: EditableElementProps) {
   const [isEditing, setIsEditing] = useState(false);
@@ -1390,12 +1405,12 @@ function EditableElement({
   const handleStartEdit = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (element.type === "divider") return;
-    
     selectElement(cardId, element.id);
-    
-    // For images, selecting is enough — the edit panel handles the rest
+
+    if (readOnly) return;
+
     if (element.type === "image") return;
-    
+
     setIsEditing(true);
     setEditValue(element.content);
   };
@@ -1506,13 +1521,14 @@ function EditableElement({
           onClick={handleStartEdit}
           data-image-variation-anchor={element.imageVariations ? "true" : undefined}
           className={cn(
-            "group relative rounded overflow-hidden cursor-pointer transition-all border-2",
+            "group relative rounded overflow-hidden transition-all border-2",
+            readOnly ? "cursor-default" : "cursor-pointer",
             isImageSelected
               ? "border-[#0F8EFF] ring-2 ring-[#0F8EFF]/20"
               : "border-transparent",
             !element.imageData?.src && "h-36 bg-[var(--surface-subtle)] flex items-center justify-center"
           )}
-          title="Click to edit image"
+          title={readOnly ? "View only (in review)" : "Click to edit image"}
         >
           {element.imageData?.src ? (
             <>
@@ -1529,7 +1545,7 @@ function EditableElement({
               {element.imageVariations?.isRefreshing && (
                 <div className="absolute inset-0 bg-[var(--surface-active)] shimmer" />
               )}
-              {!element.imageVariations && (
+              {!element.imageVariations && !readOnly && (
                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-all duration-150 flex items-center justify-center opacity-0 group-hover:opacity-100">
                   <div className="flex flex-col items-center gap-1">
                     <ImageIcon className="w-5 h-5 text-white" />
@@ -1572,12 +1588,13 @@ function EditableElement({
         ) : (
           <h4
             onClick={handleSelect}
-            onDoubleClick={handleStartEdit}
+            onDoubleClick={readOnly ? undefined : handleStartEdit}
             className={cn(
-              "font-bold text-[var(--text-primary)] cursor-default rounded px-2 py-1 -mx-2 -my-1 transition-colors hover:bg-[var(--background)]",
-              isEmail ? "text-[16px]" : "text-[14px]"
+              "font-bold text-[var(--text-primary)] rounded px-2 py-1 -mx-2 -my-1",
+              isEmail ? "text-[16px]" : "text-[14px]",
+              readOnly ? "cursor-default" : "cursor-default transition-colors hover:bg-[var(--background)]",
             )}
-            title="Double-click to edit"
+            title={readOnly ? undefined : "Double-click to edit"}
           >
             {element.content}
           </h4>
@@ -1627,12 +1644,13 @@ function EditableElement({
         ) : (
           <p
             onClick={handleSelect}
-            onDoubleClick={handleStartEdit}
+            onDoubleClick={readOnly ? undefined : handleStartEdit}
             className={cn(
-              "text-[var(--text-muted)] whitespace-pre-line cursor-default rounded px-2 py-1 -mx-2 -my-1 transition-colors hover:bg-[var(--background)]",
-              isEmail ? "text-[13px] leading-relaxed" : "text-[13px] leading-snug"
+              "text-[var(--text-muted)] whitespace-pre-line rounded px-2 py-1 -mx-2 -my-1",
+              isEmail ? "text-[13px] leading-relaxed" : "text-[13px] leading-snug",
+              readOnly ? "cursor-default" : "cursor-default transition-colors hover:bg-[var(--background)]",
             )}
-            title="Double-click to edit"
+            title={readOnly ? undefined : "Double-click to edit"}
           >
             {element.content}
           </p>
@@ -1658,9 +1676,12 @@ function EditableElement({
           ) : (
             <div
               onClick={handleSelect}
-              onDoubleClick={handleStartEdit}
-              className="inline-block px-4 py-2 rounded font-bold text-white cursor-default transition-opacity hover:opacity-80 text-[13px] bg-neutral-900"
-              title="Double-click to edit"
+              onDoubleClick={readOnly ? undefined : handleStartEdit}
+              className={cn(
+                "inline-block px-4 py-2 rounded font-bold text-white text-[13px] bg-neutral-900",
+                readOnly ? "cursor-default" : "cursor-default transition-opacity hover:opacity-80",
+              )}
+              title={readOnly ? undefined : "Double-click to edit"}
             >
               {element.content}
             </div>
@@ -1678,9 +1699,12 @@ function EditableElement({
         ) : (
           <p
             onClick={handleSelect}
-            onDoubleClick={handleStartEdit}
-            className="text-[13px] text-[var(--text-muted)] italic cursor-default rounded px-2 py-1 -mx-2 -my-1 transition-colors hover:bg-[var(--background)]"
-            title="Double-click to edit"
+            onDoubleClick={readOnly ? undefined : handleStartEdit}
+            className={cn(
+              "text-[13px] text-[var(--text-muted)] italic rounded px-2 py-1 -mx-2 -my-1",
+              readOnly ? "cursor-default" : "cursor-default transition-colors hover:bg-[var(--background)]",
+            )}
+            title={readOnly ? undefined : "Double-click to edit"}
           >
             {element.content}
           </p>
