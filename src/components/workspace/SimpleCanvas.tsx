@@ -18,6 +18,8 @@ import { useRegulatedContentStore, filterClaimsForContext, elementKey } from "@/
 import { regulatedEmailChromeAnchors } from "@/lib/regulated-email-anchors";
 import { scanCardsForCompliance } from "@/lib/compliance-scan";
 import { ComplianceFlagIcon } from "@/components/regulated/ComplianceFlagIcon";
+import { ElementSidePanel, RephraseIcon, SourcesIcon } from "@/components/regulated/ElementSidePanel";
+import { RephraseElementPopup } from "@/components/regulated/RephraseElementPopup";
 
 interface SimpleCanvasProps {
   className?: string;
@@ -703,7 +705,53 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
     [projectId, card.channel, card.elements],
   );
 
-  const { moveCard, moveCards, addElement, insertElement, updateElement, addVariant, removeVariant, updateVariantElement, selectVariant, selectedVariantId, cardGroups, removeFromGroup, selectedElement, selectImageVariation, setImageVariationsRefreshing, setImageVariations, addGeneratedImages } = useSimpleCanvasStore();
+  const { moveCard, moveCards, addElement, insertElement, updateElement, addVariant, removeVariant, updateVariantElement, selectVariant, selectedVariantId, cardGroups, removeFromGroup, selectedElement, selectElement, selectImageVariation, setImageVariationsRefreshing, setImageVariations, addGeneratedImages } = useSimpleCanvasStore();
+
+  // Side panel — active text element for this card
+  const [rephraseOpen, setRephraseOpen] = useState(false);
+  const [rephraseTargetElement, setRephraseTargetElement] = useState<ContentElement | null>(null);
+
+  const activeElement = useMemo(() => {
+    if (!selectedElement || selectedElement.cardId !== card.id) return null;
+    return card.elements.find((e) => e.id === selectedElement.elementId) ?? null;
+  }, [selectedElement, card.id, card.elements]);
+
+  const activeIsTextElement =
+    activeElement?.type === "headline" ||
+    activeElement?.type === "body" ||
+    activeElement?.type === "cta";
+
+  const regulatedProfile = useRegulatedContentStore((s) => s.profile);
+  const regulatedDismissed = useRegulatedContentStore((s) => s.dismissedByElement);
+  const activeSuggestionCount = useMemo(() => {
+    if (!activeElement || !activeIsTextElement || activeElement.type === "divider") return 0;
+    const dismissed = regulatedDismissed[elementKey(card.id, activeElement.id)] ?? [];
+    return filterClaimsForContext({
+      profile: regulatedProfile,
+      channel: card.channel as "email" | "sms",
+      elementType: activeElement.type as "headline" | "body" | "cta",
+      dismissedIds: dismissed,
+    }).length;
+  }, [activeElement, activeIsTextElement, regulatedProfile, regulatedDismissed, card.id, card.channel]);
+
+  // Measure the selected element's vertical offset within the card so the side panel aligns with it
+  const canvasZoom = useSimpleCanvasStore((s) => s.viewport.zoom);
+
+  // getBoundingClientRect() returns screen pixels (after the canvas zoom transform).
+  // CSS `top` on an absolutely-positioned child is in local (pre-zoom) canvas pixels,
+  // so we must divide by zoom to convert back.
+  const [sidePanelTop, setSidePanelTop] = useState(0);
+  useLayoutEffect(() => {
+    if (!activeElement || !dragRef.current) {
+      setSidePanelTop(0);
+      return;
+    }
+    const el = dragRef.current.querySelector<HTMLElement>(`[data-element-id="${activeElement.id}"]`);
+    if (!el) { setSidePanelTop(0); return; }
+    const cardRect = dragRef.current.getBoundingClientRect();
+    const elRect = el.getBoundingClientRect();
+    setSidePanelTop((elRect.top - cardRect.top) / canvasZoom);
+  }, [activeElement?.id, card.elements, canvasZoom]);
   const resolvedTheme = useThemeStore((s) => s.resolvedTheme);
   const isDark = resolvedTheme === "dark";
   const isEmail = card.channel === "email";
@@ -1207,6 +1255,46 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
           </div>
         </div>
       )}
+
+      {/* Element side panel — floats to the right of the card when a text element is selected */}
+      <AnimatePresence>
+        {activeIsTextElement && activeElement && (
+          <div className="absolute left-[calc(100%+12px)] z-20 pointer-events-auto" style={{ top: sidePanelTop }}>
+            <ElementSidePanel
+              actions={[
+                {
+                  id: "rephrase",
+                  label: "Rephrase",
+                  icon: <RephraseIcon />,
+                  onClick: () => {
+                    setRephraseTargetElement(activeElement);
+                    setRephraseOpen(true);
+                  },
+                },
+                {
+                  id: "see-sources",
+                  label: "See sources",
+                  icon: <SourcesIcon />,
+                  badge: activeSuggestionCount,
+                  onClick: () => selectElement(card.id, activeElement.id),
+                },
+              ]}
+            />
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Rephrase popup — rendered as portal so it escapes canvas zoom transform */}
+      <AnimatePresence>
+        {rephraseOpen && rephraseTargetElement && (
+          <RephraseElementPopup
+            cardId={card.id}
+            element={rephraseTargetElement}
+            channel={card.channel}
+            onClose={() => setRephraseOpen(false)}
+          />
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
@@ -1276,6 +1364,8 @@ function EditableElement({
   const { selectedElement, selectElement, clearImageVariations } = useSimpleCanvasStore();
   const compliancePulseKey = useSimpleCanvasStore((s) => s.compliancePulseKey);
   const isImageSelected = selectedElement?.cardId === cardId && selectedElement?.elementId === element.id;
+  const isElementSelected = selectedElement?.cardId === cardId && selectedElement?.elementId === element.id;
+  const isTextElement = element.type === "headline" || element.type === "body" || element.type === "cta";
 
   useEffect(() => {
     if (!isImageSelected && element.imageVariations && !element.imageVariations.isRefreshing) {
@@ -1290,11 +1380,17 @@ function EditableElement({
     }
   }, [element.content, isEditing]);
 
+  // Single click on text elements: select only, show action menu without entering edit mode
+  const handleSelect = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    selectElement(cardId, element.id);
+  };
+
+  // Double-click on text elements (or single click on images): enters inline edit / image panel
   const handleStartEdit = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (element.type === "divider") return;
     
-    // Always select the element so the code editor highlights the right lines
     selectElement(cardId, element.id);
     
     // For images, selecting is enough — the edit panel handles the rest
@@ -1363,9 +1459,13 @@ function EditableElement({
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.05, duration: 0.2 }}
       data-editable
+      data-element-id={element.id}
       className={cn(
-        "relative",
+        "relative transition-all duration-150",
         showRegulatedChrome && "pl-10",
+        // Element selected — dashed blue outline (distinguishes from solid card-level selection)
+        isElementSelected && isTextElement &&
+          "rounded-md outline outline-2 outline-[#0F8EFF] [outline-style:dashed] outline-offset-2 bg-blue-50/30",
         regulated &&
           element.type !== "divider" &&
           (compliancePulseKey === ek ||
@@ -1471,12 +1571,13 @@ function EditableElement({
           />
         ) : (
           <h4
-            onClick={handleStartEdit}
+            onClick={handleSelect}
+            onDoubleClick={handleStartEdit}
             className={cn(
-              "font-bold text-[var(--text-primary)] cursor-text rounded px-2 py-1 -mx-2 -my-1 transition-colors hover:bg-[var(--background)]",
+              "font-bold text-[var(--text-primary)] cursor-default rounded px-2 py-1 -mx-2 -my-1 transition-colors hover:bg-[var(--background)]",
               isEmail ? "text-[16px]" : "text-[14px]"
             )}
-            title="Click to edit"
+            title="Double-click to edit"
           >
             {element.content}
           </h4>
@@ -1525,12 +1626,13 @@ function EditableElement({
           </div>
         ) : (
           <p
-            onClick={handleStartEdit}
+            onClick={handleSelect}
+            onDoubleClick={handleStartEdit}
             className={cn(
-              "text-[var(--text-muted)] whitespace-pre-line cursor-text rounded px-2 py-1 -mx-2 -my-1 transition-colors hover:bg-[var(--background)]",
+              "text-[var(--text-muted)] whitespace-pre-line cursor-default rounded px-2 py-1 -mx-2 -my-1 transition-colors hover:bg-[var(--background)]",
               isEmail ? "text-[13px] leading-relaxed" : "text-[13px] leading-snug"
             )}
-            title="Click to edit"
+            title="Double-click to edit"
           >
             {element.content}
           </p>
@@ -1555,9 +1657,10 @@ function EditableElement({
             />
           ) : (
             <div
-              onClick={handleStartEdit}
-              className="inline-block px-4 py-2 rounded font-bold text-white cursor-text transition-opacity hover:opacity-80 text-[13px] bg-neutral-900"
-              title="Click to edit"
+              onClick={handleSelect}
+              onDoubleClick={handleStartEdit}
+              className="inline-block px-4 py-2 rounded font-bold text-white cursor-default transition-opacity hover:opacity-80 text-[13px] bg-neutral-900"
+              title="Double-click to edit"
             >
               {element.content}
             </div>
@@ -1574,9 +1677,10 @@ function EditableElement({
           />
         ) : (
           <p
-            onClick={handleStartEdit}
-            className="text-[13px] text-[var(--text-muted)] italic cursor-text rounded px-2 py-1 -mx-2 -my-1 transition-colors hover:bg-[var(--background)]"
-            title="Click to edit"
+            onClick={handleSelect}
+            onDoubleClick={handleStartEdit}
+            className="text-[13px] text-[var(--text-muted)] italic cursor-default rounded px-2 py-1 -mx-2 -my-1 transition-colors hover:bg-[var(--background)]"
+            title="Double-click to edit"
           >
             {element.content}
           </p>
