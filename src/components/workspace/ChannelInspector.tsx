@@ -2566,6 +2566,7 @@ function VariantElementsList({
   const [showAddMenu, setShowAddMenu] = useState(false);
   const dragItem = useRef<number | null>(null);
   const dragOverItem = useRef<number | null>(null);
+  const selectVariant = useSimpleCanvasStore((s) => s.selectVariant);
 
   const handleAddElement = (type: ContentElement["type"]) => {
     const id = `${type}-v-${Date.now()}`;
