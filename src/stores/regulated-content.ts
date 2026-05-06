@@ -34,7 +34,7 @@ export interface ApprovedClaim {
 export const APPROVED_CLAIMS: ApprovedClaim[] = [
   {
     id: "claim-oncura-001",
-    code: "ONCURA-MECH-01",
+    code: "RCS-0001",
     title: "MOA — pathway framing",
     body:
       "ONCURA® (oncurimab) is a humanized monoclonal antibody designed to bind its target with high specificity, supporting tumor microenvironment modulation as described in the approved prescribing information.",
@@ -57,7 +57,7 @@ export const APPROVED_CLAIMS: ApprovedClaim[] = [
   },
   {
     id: "claim-oncura-002",
-    code: "ONCURA-PI-REF",
+    code: "RCS-0002",
     title: "Efficacy framing (label-aligned placeholder)",
     body:
       "Efficacy results, study design, and endpoint hierarchy must mirror the approved label and MLR-stamped slide deck. Replace this claim with verbatim approved language before use.",
@@ -80,7 +80,7 @@ export const APPROVED_CLAIMS: ApprovedClaim[] = [
   },
   {
     id: "claim-oncura-003",
-    code: "ONCURA-ISI-ANCHOR",
+    code: "RCS-0003",
     title: "ISI anchor line",
     body:
       "IMPORTANT SAFETY INFORMATION: [Insert boxed warning, contraindications, warnings and precautions, and adverse reactions per local label]. Please see full Prescribing Information for ONCURA® (oncurimab).",
@@ -103,7 +103,7 @@ export const APPROVED_CLAIMS: ApprovedClaim[] = [
   },
   {
     id: "claim-oncura-eu-01",
-    code: "ONCURA-EU-SMPC",
+    code: "RCS-0004",
     title: "EU — SmPC reference",
     body:
       "For healthcare professionals in the EU: refer to the Summary of Product Characteristics (SmPC) before prescribing. Local requirements may differ from US labeling.",
@@ -126,7 +126,7 @@ export const APPROVED_CLAIMS: ApprovedClaim[] = [
   },
   {
     id: "claim-oncura-img-01",
-    code: "ONCURA-VIS-01",
+    code: "RCS-0005",
     title: "Approved visual — mechanism schematic",
     body: "Use only the MLR-approved mechanism schematic (version 3.2 or later) from the digital asset library. Do not crop mandatory footnotes.",
     status: "approved",
@@ -162,16 +162,21 @@ interface RegulatedContentState {
   dismissedByElement: Record<string, string[]>;
   /** Author-marked blocks for compliance review — `${cardId}:${elementId}` */
   creatorComplianceFlags: Record<string, boolean>;
+  /** Dismissed non-blocking compliance flags by element key (`${cardId}:${elementId}`). */
+  dismissedComplianceFlags: Record<string, boolean>;
   setProfile: (partial: Partial<RegulatedProfile>) => void;
   dismissClaim: (elementKey: string, claimId: string) => void;
   clearDismissedForElement: (elementKey: string) => void;
   toggleCreatorComplianceFlag: (elementKey: string) => void;
+  dismissComplianceFlag: (elementKey: string) => void;
+  restoreComplianceFlag: (elementKey: string) => void;
 }
 
 export const useRegulatedContentStore = create<RegulatedContentState>((set) => ({
   profile: { ...defaultProfile },
   dismissedByElement: {},
   creatorComplianceFlags: {},
+  dismissedComplianceFlags: {},
 
   setProfile: (partial) =>
     set((s) => ({
@@ -202,6 +207,20 @@ export const useRegulatedContentStore = create<RegulatedContentState>((set) => (
       if (next[elementKey]) delete next[elementKey];
       else next[elementKey] = true;
       return { creatorComplianceFlags: next };
+    }),
+
+  dismissComplianceFlag: (elementKey) =>
+    set((s) => ({
+      dismissedComplianceFlags: {
+        ...s.dismissedComplianceFlags,
+        [elementKey]: true,
+      },
+    })),
+
+  restoreComplianceFlag: (elementKey) =>
+    set((s) => {
+      const { [elementKey]: _, ...rest } = s.dismissedComplianceFlags;
+      return { dismissedComplianceFlags: rest };
     }),
 }));
 

@@ -8,9 +8,8 @@ import {
   elementKey,
   type ApprovedClaim,
 } from "@/stores/regulated-content";
-import { scanCardsForCompliance } from "@/lib/compliance-scan";
+import { extractLinkedClaimCodes } from "@/lib/linked-claims";
 import type { ChannelCard, ContentElement } from "@/types/simple-canvas";
-import { cn } from "@/lib/cn";
 
 interface InlineClaimsSuggestionsProps {
   card: ChannelCard;
@@ -25,10 +24,20 @@ export function InlineClaimsSuggestions({ card, element, readOnly = false }: Inl
   const creatorFlags = useRegulatedContentStore((s) => s.creatorComplianceFlags);
   const dismissClaim = useRegulatedContentStore((s) => s.dismissClaim);
   const updateElement = useSimpleCanvasStore((s) => s.updateElement);
-  const cards = useSimpleCanvasStore((s) => s.cards);
 
   const key = elementKey(card.id, element.id);
   const dismissed = dismissedByElement[key] ?? [];
+  const linkedClaimCodes = useMemo(() => extractLinkedClaimCodes(element.content), [element.content]);
+  const isLogoImageBlock = useMemo(() => {
+    if (element.type !== "image") return false;
+    const src = element.imageData?.src?.toLowerCase() ?? "";
+    const alt = element.imageData?.alt?.toLowerCase() ?? "";
+    const descriptor = `${element.content} ${alt} ${src}`.toLowerCase();
+    return (
+      /\blogo\b|\bwordmark\b|\bbrand mark\b|\blockup\b/.test(descriptor) ||
+      /\/logo[\w-]*\.(png|jpe?g|webp|svg)$/.test(src)
+    );
+  }, [element]);
 
   const suggestions = useMemo(
     () =>
@@ -42,94 +51,58 @@ export function InlineClaimsSuggestions({ card, element, readOnly = false }: Inl
           }),
     [profile, card.channel, element.type, dismissed],
   );
-
-  const elementIssues = useMemo(() => {
-    const all = scanCardsForCompliance(cards, profile, creatorFlags);
-    return all.filter(
-      (i) =>
-        i.cardId === card.id &&
-        i.elementId === element.id &&
-        i.ruleId !== "CR-CREATOR-01",
-    );
-  }, [cards, profile, creatorFlags, card.id, element.id]);
+  const visibleSuggestions = useMemo(
+    () => suggestions.filter((claim) => !linkedClaimCodes.includes(claim.code)),
+    [suggestions, linkedClaimCodes],
+  );
 
   if (element.type === "divider") return null;
+  if (isLogoImageBlock) return null;
+  if (visibleSuggestions.length === 0) return null;
 
   return (
     <div className="border-b border-[var(--border)] bg-gradient-to-b from-indigo-50/80 to-transparent px-4 py-3">
       <div className="flex items-center justify-between gap-2 mb-2">
-        <h3 className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-indigo-900/80">
+        <h3 className="inline-flex min-w-0 flex-1 items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-indigo-900/80">
           <SparklesIcon className="h-3.5 w-3.5 text-indigo-600" />
-          Recommendations
+          Suggestions ({visibleSuggestions.length})
         </h3>
-        <span className="text-[10px] font-medium text-indigo-700/80">AI generated suggestions</span>
       </div>
-
-      {elementIssues.length > 0 && (
-        <div className="mb-2 space-y-1">
-          {elementIssues.map((i) => (
-            <div
-              key={i.id}
-              className={cn(
-                "rounded-md border px-2 py-1.5 text-[11px] font-medium",
-                i.severity === "error"
-                  ? "border-red-200 bg-red-50 text-red-900"
-                  : i.severity === "warning"
-                    ? "border-amber-200 bg-amber-50 text-amber-950"
-                    : "border-slate-200 bg-slate-50 text-slate-800",
-              )}
-            >
-              {i.message}
-            </div>
-          ))}
+      {!readOnly && visibleSuggestions.length > 0 && (
+        <div className="mb-2 flex justify-end">
+          <button
+            type="button"
+            onClick={() => {
+              for (const claim of visibleSuggestions) dismissClaim(key, claim.id);
+            }}
+            className="text-[11px] font-semibold text-indigo-700 underline underline-offset-2 hover:text-indigo-800"
+          >
+            Dismiss all
+          </button>
         </div>
       )}
-
-      {suggestions.length === 0 ? (
-        <p className="text-[12px] text-[var(--text-muted)]">
-          No matching approved claims for this element with the current audience, region, and intent. Adjust the
-          profile in the compliance bar or clear dismissed suggestions.
-        </p>
-      ) : (
-        <ul className="space-y-2">
-          {suggestions.map((claim) => (
+      <ul className="space-y-2">
+        {visibleSuggestions.map((claim) => (
             <li
               key={claim.id}
-              className="rounded-lg border border-indigo-200/80 bg-white/90 p-2 shadow-sm"
+              className="rounded-lg border border-indigo-200/80 bg-white/90 p-2.5 shadow-sm"
             >
-              <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <span className="inline-flex rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700">
-                    Claim recommendation
-                  </span>
-                  <p className="text-[11px] font-bold text-indigo-950">{claim.title}</p>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                    <p className="text-[10px] font-mono text-indigo-700/90">{claim.code}</p>
-                    <span className="inline-flex rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
-                      {claim.status}
-                    </span>
-                  </div>
+                  <p className="text-[11px] font-mono font-semibold text-indigo-700/90">{claim.code}</p>
                 </div>
+                <span className="inline-flex shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+                  Approved Claim
+                </span>
               </div>
-              <p className="mt-1 text-[12px] leading-snug text-[var(--text-secondary)]">{claim.body}</p>
-              <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[11px]">
-                <details className="group">
-                  <summary
-                    title={claim.recommendationReasoning}
-                    className="cursor-pointer list-none font-semibold text-indigo-700 underline decoration-dotted underline-offset-2 hover:text-indigo-800"
-                  >
-                    Reasoning
-                  </summary>
-                  <p className="mt-1 max-w-[52ch] rounded-md border border-indigo-100 bg-indigo-50/40 px-2 py-1.5 text-[11px] leading-snug text-indigo-900">
-                    {claim.recommendationReasoning}
-                  </p>
-                </details>
+              <p className="mt-2 text-[12px] leading-snug text-[var(--text-secondary)]">{claim.body}</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
                 <details className="group">
                   <summary
                     title={claim.references.map((r) => r.label).join(" | ")}
-                    className="cursor-pointer list-none font-semibold text-indigo-700 underline decoration-dotted underline-offset-2 hover:text-indigo-800"
+                    className="cursor-pointer list-none px-0 py-0 font-semibold text-indigo-700 underline decoration-dotted underline-offset-2 hover:text-indigo-800"
                   >
-                    References
+                    References ({claim.references.length})
                   </summary>
                   <div className="mt-1 max-w-[52ch] rounded-md border border-indigo-100 bg-indigo-50/40 px-2 py-1.5">
                     <ul className="space-y-0.5">
@@ -154,28 +127,29 @@ export function InlineClaimsSuggestions({ card, element, readOnly = false }: Inl
                   </div>
                 </details>
               </div>
-              {!readOnly && (
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => applyClaim(updateElement, card.id, element, claim)}
-                    className="rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-700"
-                  >
-                    Insert into block
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => dismissClaim(key, claim.id)}
-                    className="rounded-md border border-[var(--border)] bg-white px-2.5 py-1 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"
-                  >
-                    Dismiss
-                  </button>
-                </div>
-              )}
+              <div className="mt-2 space-y-1.5">
+                {!readOnly && (
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => applyClaim(updateElement, card.id, element, claim)}
+                      className="rounded-md bg-indigo-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-indigo-700"
+                    >
+                      Insert
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => dismissClaim(key, claim.id)}
+                      className="rounded-md border border-[var(--border)] bg-white px-2.5 py-1 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                )}
+              </div>
             </li>
-          ))}
-        </ul>
-      )}
+        ))}
+      </ul>
     </div>
   );
 }

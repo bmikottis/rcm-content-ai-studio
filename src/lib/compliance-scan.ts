@@ -95,6 +95,11 @@ export function scanCardsForCompliance(
     for (const el of card.elements) {
       if (el.type === "image") {
         const alt = el.imageData?.alt?.trim() ?? "";
+        const src = el.imageData?.src?.toLowerCase() ?? "";
+        const descriptor = `${el.content} ${alt} ${src}`.toLowerCase();
+        const appearsToBeLogo =
+          /\blogo\b|\bwordmark\b|\bbrand mark\b|\blockup\b/.test(descriptor) ||
+          /\/logo[\w-]*\.(png|jpe?g|webp|svg)$/.test(src);
         if (!alt) {
           issues.push({
             id: id("img-alt", card.id, el.id),
@@ -103,6 +108,17 @@ export function scanCardsForCompliance(
             message: "Image is missing alt text — required for accessibility and many MLR checklists.",
             cardId: card.id,
             elementId: el.id,
+          });
+        }
+        if (appearsToBeLogo) {
+          issues.push({
+            id: id("logo-usage", card.id, el.id),
+            severity: "warning",
+            ruleId: "BR-LOGO-01",
+            message: "Logo usage requires brand-guideline validation (approved lockup, spacing, and non-distortion).",
+            cardId: card.id,
+            elementId: el.id,
+            hint: "Verify this logo asset and placement against approved brand lockup rules before review.",
           });
         }
       }

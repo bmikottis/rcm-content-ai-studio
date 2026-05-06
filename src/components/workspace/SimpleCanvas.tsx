@@ -17,8 +17,9 @@ import { useCanvasStore } from "@/stores/canvas";
 import { useRegulatedContentStore, filterClaimsForContext, elementKey } from "@/stores/regulated-content";
 import { regulatedEmailChromeAnchors } from "@/lib/regulated-email-anchors";
 import { scanCardsForCompliance } from "@/lib/compliance-scan";
+import { extractLinkedClaimCodes, stripApprovedClaimStamps } from "@/lib/linked-claims";
 import { ComplianceFlagIcon } from "@/components/regulated/ComplianceFlagIcon";
-import { ElementSidePanel, RephraseIcon, SourcesIcon } from "@/components/regulated/ElementSidePanel";
+import { ElementSidePanel, RephraseIcon } from "@/components/regulated/ElementSidePanel";
 import { RephraseElementPopup } from "@/components/regulated/RephraseElementPopup";
 
 interface SimpleCanvasProps {
@@ -1283,13 +1284,6 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
                     setRephraseOpen(true);
                   },
                 },
-                {
-                  id: "see-sources",
-                  label: "See sources",
-                  icon: <SourcesIcon />,
-                  badge: activeSuggestionCount,
-                  onClick: () => selectElement(card.id, activeElement.id),
-                },
               ]}
             />
           </div>
@@ -1349,29 +1343,36 @@ function EditableElement({
   const profile = useRegulatedContentStore((s) => s.profile);
   const dismissedByElement = useRegulatedContentStore((s) => s.dismissedByElement);
   const creatorFlags = useRegulatedContentStore((s) => s.creatorComplianceFlags);
+  const dismissedComplianceFlags = useRegulatedContentStore((s) => s.dismissedComplianceFlags);
 
   const ek = elementKey(cardId, element.id);
   const dismissed = dismissedByElement[ek] ?? [];
+  const linkedClaimCodes = useMemo(() => extractLinkedClaimCodes(element.content), [element.content]);
+  const hasLinkedClaims = linkedClaimCodes.length > 0;
   const suggestionCount = useMemo(() => {
     if (!regulated || !regulatedClaimsAnchor || element.type === "divider") return 0;
-    return filterClaimsForContext({
+    const base = filterClaimsForContext({
       profile,
       channel,
       elementType: element.type,
       dismissedIds: dismissed,
-    }).length;
-  }, [regulated, regulatedClaimsAnchor, element.type, profile, channel, dismissed]);
+    });
+    return base.filter((claim) => !linkedClaimCodes.includes(claim.code)).length;
+  }, [regulated, regulatedClaimsAnchor, element.type, profile, channel, dismissed, linkedClaimCodes]);
 
   const isCreatorFlagged = Boolean(creatorFlags[ek]);
   const showRegulatedChrome = regulated && element.type !== "divider" && regulatedClaimsAnchor;
   const cards = useSimpleCanvasStore((s) => s.cards);
 
-  const hasFlagScanIssue = useMemo(() => {
-    if (!regulated || !regulatedFlagAnchor || !includeComplianceScan) return false;
-    return scanCardsForCompliance(cards, profile, creatorFlags).some(
-      (i) => i.cardId === cardId && i.elementId === element.id,
-    );
-  }, [regulated, regulatedFlagAnchor, includeComplianceScan, cards, profile, creatorFlags, cardId, element.id]);
+  const flagScanIssueCount = useMemo(() => {
+    if (!regulated || !regulatedFlagAnchor || !includeComplianceScan) return 0;
+    if (dismissedComplianceFlags[ek]) return 0;
+    return scanCardsForCompliance(cards, profile, creatorFlags).filter(
+      (i) => i.cardId === cardId && i.elementId === element.id && i.ruleId !== "CR-CREATOR-01",
+    ).length;
+  }, [regulated, regulatedFlagAnchor, includeComplianceScan, cards, profile, creatorFlags, cardId, element.id, dismissedComplianceFlags, ek]);
+  const hasFlagScanIssue = flagScanIssueCount > 0;
+  const complianceFlagCount = (isCreatorFlagged || hasFlagScanIssue) ? 1 : 0;
 
   const showComplianceFlagBadge =
     regulated && regulatedFlagAnchor && element.type !== "divider" && (isCreatorFlagged || hasFlagScanIssue);
@@ -1381,6 +1382,16 @@ function EditableElement({
   const isImageSelected = selectedElement?.cardId === cardId && selectedElement?.elementId === element.id;
   const isElementSelected = selectedElement?.cardId === cardId && selectedElement?.elementId === element.id;
   const isTextElement = element.type === "headline" || element.type === "body" || element.type === "cta";
+  const renderedContent = useMemo(() => stripApprovedClaimStamps(element.content), [element.content]);
+  const linkedClaimParts = useMemo(() => {
+    const match = element.content.match(/\[Approved claim [^\]]+\]\s*\n?([\s\S]*)$/);
+    if (!match) return null;
+    const stampIdx = element.content.indexOf(match[0]);
+    const before = stampIdx > 0 ? element.content.slice(0, stampIdx).trimEnd() : "";
+    const claimText = (match[1] ?? "").trim();
+    if (!claimText) return null;
+    return { before, claimText };
+  }, [element.content]);
 
   useEffect(() => {
     if (!isImageSelected && element.imageVariations && !element.imageVariations.isRefreshing) {
@@ -1486,28 +1497,42 @@ function EditableElement({
           (compliancePulseKey === ek ||
             (regulatedFlagAnchor && (isCreatorFlagged || hasFlagScanIssue))) &&
           "rounded-lg ring-2 ring-amber-500 ring-offset-2 ring-offset-white",
+        isElementSelected && hasLinkedClaims && "rounded-lg ring-2 ring-indigo-300 ring-offset-2 ring-offset-white",
         regulated && element.type !== "divider" && compliancePulseKey === ek && "animate-[pulse_1.1s_ease-in-out_2]",
       )}
     >
       {(showComplianceFlagBadge ||
+        hasLinkedClaims ||
         (showRegulatedChrome && regulatedClaimsAnchor && suggestionCount > 0)) && (
-        <div className="pointer-events-none absolute -right-0.5 -top-1 z-[30] flex flex-row-reverse items-center gap-1">
+        <div className="pointer-events-none absolute -right-0.5 -top-1 z-[30] flex flex-col items-end gap-1">
           {showRegulatedChrome && regulatedClaimsAnchor && suggestionCount > 0 && (
             <div
-              className="flex h-[22px] min-w-[22px] items-center justify-center rounded-full bg-indigo-600 px-1 text-[11px] font-bold text-white shadow-md ring-2 ring-white"
+              className="flex h-[22px] min-w-[22px] items-center justify-center gap-0.5 rounded-full bg-indigo-600 px-1 text-[10px] font-bold text-white shadow-md ring-2 ring-white"
               title="Claim suggestions for this block — open the inspector to insert approved copy"
               aria-label={`${suggestionCount} regulatory claim suggestions`}
             >
               {suggestionCount > 9 ? "9+" : suggestionCount}
+              <SparklesBadgeIcon className="h-2.5 w-2.5" />
             </div>
           )}
           {showComplianceFlagBadge && (
             <div
-              className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-amber-600 text-white shadow-md ring-2 ring-white"
+              className="flex h-[22px] min-w-[22px] shrink-0 items-center justify-center gap-0.5 rounded-full bg-amber-600 px-1 text-[10px] font-bold text-white shadow-md ring-2 ring-white"
               title="Compliance review — see flags in the inspector"
               aria-label="Compliance flag on this block"
             >
-              <ComplianceFlagIcon className="h-3.5 w-3.5" />
+              {complianceFlagCount}
+              <ComplianceFlagIcon className="h-2.5 w-2.5" />
+            </div>
+          )}
+          {hasLinkedClaims && (
+            <div
+              className="flex h-[22px] min-w-[22px] items-center justify-center gap-0.5 rounded-full bg-indigo-100 px-1 text-[10px] font-bold text-indigo-800 shadow-md ring-2 ring-white"
+              title={`Linked claim${linkedClaimCodes.length === 1 ? "" : "s"}: ${linkedClaimCodes.join(", ")}`}
+              aria-label={`${linkedClaimCodes.length} linked claim annotations`}
+            >
+              {linkedClaimCodes.length}
+              <LinkedClaimIcon className="h-2.5 w-2.5" />
             </div>
           )}
         </div>
@@ -1596,7 +1621,22 @@ function EditableElement({
             )}
             title={readOnly ? undefined : "Double-click to edit"}
           >
-            {element.content}
+            {isElementSelected && linkedClaimParts ? (
+              <>
+                {linkedClaimParts.before ? `${linkedClaimParts.before} ` : ""}
+                <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-indigo-900">
+                  {linkedClaimParts.claimText}
+                </span>
+                <span
+                  className="ml-1 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-indigo-100 px-1 text-indigo-800 align-middle"
+                  title={`Linked claim${linkedClaimCodes.length === 1 ? "" : "s"}`}
+                >
+                  <LinkedClaimIcon className="h-3 w-3" />
+                </span>
+              </>
+            ) : (
+              renderedContent
+            )}
           </h4>
         )
       )}
@@ -1652,7 +1692,22 @@ function EditableElement({
             )}
             title={readOnly ? undefined : "Double-click to edit"}
           >
-            {element.content}
+            {isElementSelected && linkedClaimParts ? (
+              <>
+                {linkedClaimParts.before ? `${linkedClaimParts.before}\n\n` : ""}
+                <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-indigo-900">
+                  {linkedClaimParts.claimText}
+                </span>
+                <span
+                  className="ml-1 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-indigo-100 px-1 text-indigo-800 align-middle"
+                  title={`Linked claim${linkedClaimCodes.length === 1 ? "" : "s"}`}
+                >
+                  <LinkedClaimIcon className="h-3 w-3" />
+                </span>
+              </>
+            ) : (
+              renderedContent
+            )}
           </p>
         )
       )}
@@ -1683,7 +1738,7 @@ function EditableElement({
               )}
               title={readOnly ? undefined : "Double-click to edit"}
             >
-              {element.content}
+              {renderedContent}
             </div>
           )
         ) : isEditing ? (
@@ -1706,7 +1761,22 @@ function EditableElement({
             )}
             title={readOnly ? undefined : "Double-click to edit"}
           >
-            {element.content}
+            {isElementSelected && linkedClaimParts ? (
+              <>
+                {linkedClaimParts.before ? `${linkedClaimParts.before} ` : ""}
+                <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-indigo-900">
+                  {linkedClaimParts.claimText}
+                </span>
+                <span
+                  className="ml-1 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-indigo-100 px-1 text-indigo-800 align-middle"
+                  title={`Linked claim${linkedClaimCodes.length === 1 ? "" : "s"}`}
+                >
+                  <LinkedClaimIcon className="h-3 w-3" />
+                </span>
+              </>
+            ) : (
+              renderedContent
+            )}
           </p>
         )
       )}
@@ -1913,6 +1983,30 @@ function RefreshIcon({ className }: { className?: string }) {
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="23 4 23 10 17 10" />
       <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+    </svg>
+  );
+}
+
+function LinkedClaimIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 32 32" fill="none" aria-hidden>
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M2.95373 8.61543H29.046C29.6614 8.61543 30.1537 8.00004 29.9691 7.38465C29.3537 5.35388 28.4922 3.50771 27.323 1.84617C26.9537 1.35386 26.2768 1.29232 25.9076 1.72309C24.7384 2.83079 23.0768 3.44618 21.3537 3.44618C19.5076 3.44618 17.846 2.70771 16.6153 1.47694C16.246 1.1077 15.6307 1.1077 15.2614 1.47694C14.0307 2.70771 12.3691 3.44618 10.523 3.44618C8.79989 3.44618 7.19989 2.83079 5.96912 1.72309C5.53835 1.35386 4.86143 1.4154 4.55373 1.84617C3.3845 3.44617 2.46143 5.35388 1.90758 7.38465C1.84604 8.00004 2.33835 8.61543 2.95373 8.61543V8.61543ZM30.7692 12.5539C30.7692 12 30.3384 11.6923 29.7846 11.6923H2.21533C1.66148 11.6923 1.23071 12 1.23071 12.5539V12.7385C1.23071 21.9693 7.63071 29.6001 15.9999 30.7693C24.3692 29.6001 30.7692 21.9693 30.7692 12.8V12.5539V12.5539Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function SparklesBadgeIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 32 32" fill="none" aria-hidden>
+      <path
+        d="M30.1565 17.0329L24.178 20.0151C22.3802 20.9066 20.9333 22.3639 20.0343 24.1531L17.0482 30.1174C16.6233 30.9659 15.4042 30.9659 14.9794 30.1174L11.9932 24.1531C11.1005 22.3639 9.64123 20.9128 7.84953 20.0151L1.88335 17.0329C1.03368 16.6087 1.03368 15.3912 1.88335 14.967L7.86185 11.9848C9.6597 11.0933 11.1066 9.63602 12.0055 7.84674L14.9856 1.88249C15.4104 1.03396 16.6295 1.03396 17.0543 1.88249L20.0405 7.84674C20.9333 9.63602 22.3925 11.0871 24.1842 11.9848L30.1627 14.967C31.0124 15.3912 31.0124 16.6087 30.1627 17.0329H30.1565Z"
+        fill="currentColor"
+      />
     </svg>
   );
 }

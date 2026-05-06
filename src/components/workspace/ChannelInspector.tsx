@@ -14,8 +14,9 @@ import { InlineClaimsSuggestions } from "@/components/regulated/InlineClaimsSugg
 import { RegulatedContentProfilePanel } from "@/components/regulated/RegulatedContentProfilePanel";
 import { scanCardsForCompliance, type ComplianceIssue } from "@/lib/compliance-scan";
 import { regulatedEmailChromeAnchors } from "@/lib/regulated-email-anchors";
-import { useRegulatedContentStore, elementKey } from "@/stores/regulated-content";
+import { useRegulatedContentStore, elementKey, APPROVED_CLAIMS, filterClaimsForContext } from "@/stores/regulated-content";
 import { ComplianceFlagIcon } from "@/components/regulated/ComplianceFlagIcon";
+import { extractLinkedClaimCodes } from "@/lib/linked-claims";
 import { cn } from "@/lib/cn";
 import type { ChannelCard, CardVariant, ContentElement, CardStatus } from "@/types/simple-canvas";
 
@@ -84,28 +85,71 @@ export function ChannelInspector() {
     return card.variants?.find((v) => v.id === selectedVariantId) ?? null;
   }, [card, selectedVariantId]);
 
+  const linkedClaims = useMemo(() => {
+    if (!card) return [];
+    return card.elements.flatMap((el) => {
+      const codes = extractLinkedClaimCodes(el.content);
+      return codes.map((code, idx) => {
+        const claim = APPROVED_CLAIMS.find((c) => c.code === code);
+        return {
+          id: `${el.id}:${code}:${idx}`,
+          elementId: el.id,
+          blockLabel: ELEMENT_TYPES.find((t) => t.type === el.type)?.label ?? el.type,
+          code,
+          status: claim?.status ?? "approved",
+          body: claim?.body ?? null,
+          references: claim?.references ?? [],
+        };
+      });
+    });
+  }, [card]);
+
+  const handleLinkedClaimClick = useCallback((elementId: string) => {
+    if (!card) return;
+    focusCard(card.id);
+    selectElement(card.id, elementId);
+    pulseComplianceOnElement(card.id, elementId);
+  }, [focusCard, selectElement, pulseComplianceOnElement, card]);
+
   const profile = useRegulatedContentStore((s) => s.profile);
   const creatorFlags = useRegulatedContentStore((s) => s.creatorComplianceFlags);
+  const dismissedComplianceFlags = useRegulatedContentStore((s) => s.dismissedComplianceFlags);
   const toggleCreatorComplianceFlag = useRegulatedContentStore((s) => s.toggleCreatorComplianceFlag);
+  const dismissComplianceFlag = useRegulatedContentStore((s) => s.dismissComplianceFlag);
 
   const cardComplianceIssues = useMemo(() => {
     if (!card || card.channel !== "email") return [];
     return scanCardsForCompliance(cards, profile, creatorFlags).filter((i) => i.cardId === card.id);
   }, [card, cards, profile, creatorFlags]);
 
+  const regulatedAnchors = useMemo(() => {
+    if (!card || card.channel !== "email") return null;
+    return regulatedEmailChromeAnchors(card.elements);
+  }, [card]);
+
   const regulatedFlagRows = useMemo(() => {
     if (!card || card.channel !== "email") return [];
-    const { flagIds } = regulatedEmailChromeAnchors(card.elements);
+    const flagIds = regulatedAnchors?.flagIds ?? new Set<string>();
     const bodies = card.elements.filter((e) => e.type === "body");
     const firstBodyId = bodies[0]?.id;
     const lastBodyId = bodies[bodies.length - 1]?.id;
-    const rows: { elementId: string; blockLabel: string; detail: string; hasCreator: boolean }[] = [];
+    const rows: {
+      elementId: string;
+      blockLabel: string;
+      detail: string;
+      hasCreator: boolean;
+      hasScanIssue: boolean;
+      dismissible: boolean;
+    }[] = [];
     for (const elementId of flagIds) {
       const el = card.elements.find((e) => e.id === elementId);
       if (!el) continue;
-      const onElement = cardComplianceIssues.filter((i) => i.elementId === elementId);
+      const flagKey = elementKey(card.id, elementId);
+      const dismissed = Boolean(dismissedComplianceFlags[flagKey]);
+      const onElement = cardComplianceIssues.filter((i) => i.elementId === elementId && (i.ruleId === "CR-CREATOR-01" || !dismissed));
+      const scanIssues = onElement.filter((i) => i.ruleId !== "CR-CREATOR-01");
       const hasCreator = Boolean(creatorFlags[elementKey(card.id, elementId)]);
-      if (onElement.length === 0 && !hasCreator) continue;
+      if (scanIssues.length === 0 && !hasCreator) continue;
       const blockLabel =
         el.type === "body"
           ? el.id === firstBodyId
@@ -121,10 +165,61 @@ export function ChannelInspector() {
         blockLabel,
         detail: complianceFlagGuidance(onElement, hasCreator),
         hasCreator,
+        hasScanIssue: scanIssues.length > 0,
+        dismissible: scanIssues.every((i) => i.severity !== "error"),
       });
     }
     return rows;
-  }, [card, cardComplianceIssues, creatorFlags]);
+  }, [card, cardComplianceIssues, creatorFlags, dismissedComplianceFlags, regulatedAnchors]);
+
+  const recommendationCountByElement = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!regulatedCanvas || !card) return map;
+    for (const el of card.elements) {
+      if (el.type === "divider") continue;
+      if (!regulatedAnchors?.claimHintIds.has(el.id)) {
+        map.set(el.id, 0);
+        continue;
+      }
+      const src = el.type === "image" ? (el.imageData?.src?.toLowerCase() ?? "") : "";
+      const alt = el.type === "image" ? (el.imageData?.alt?.toLowerCase() ?? "") : "";
+      const descriptor = `${el.content} ${alt} ${src}`.toLowerCase();
+      const isLogoImage =
+        el.type === "image" &&
+        (/\blogo\b|\bwordmark\b|\bbrand mark\b|\blockup\b/.test(descriptor) ||
+          /\/logo[\w-]*\.(png|jpe?g|webp|svg)$/.test(src));
+      if (isLogoImage) {
+        map.set(el.id, 0);
+        continue;
+      }
+      const key = elementKey(card.id, el.id);
+      const dismissed = useRegulatedContentStore.getState().dismissedByElement[key] ?? [];
+      const linked = extractLinkedClaimCodes(el.content);
+      const count = filterClaimsForContext({
+        profile,
+        channel: card.channel as "email" | "sms",
+        elementType: el.type,
+        dismissedIds: dismissed,
+      }).filter((claim) => !linked.includes(claim.code)).length;
+      map.set(el.id, count);
+    }
+    return map;
+  }, [regulatedCanvas, card, profile, regulatedAnchors]);
+
+  const complianceCountByElement = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!regulatedCanvas || !card) return map;
+    for (const row of regulatedFlagRows) {
+      map.set(row.elementId, (map.get(row.elementId) ?? 0) + 1);
+    }
+    return map;
+  }, [regulatedCanvas, card, regulatedFlagRows]);
+
+  const frameRecommendationCount = useMemo(
+    () => Array.from(recommendationCountByElement.values()).reduce((sum, n) => sum + n, 0),
+    [recommendationCountByElement],
+  );
+  const frameComplianceCount = regulatedFlagRows.length;
 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showAddMenu, setShowAddMenu] = useState(false);
@@ -143,7 +238,8 @@ export function ChannelInspector() {
   const [isEditingGroupName, setIsEditingGroupName] = useState(false);
   const [groupNameDraft, setGroupNameDraft] = useState("");
   const groupMenuRef = useRef<HTMLDivElement>(null);
-  const [regulatedContentDetailsOpen, setRegulatedContentDetailsOpen] = useState(true);
+  const [regulatedContentDetailsOpen, setRegulatedContentDetailsOpen] = useState(false);
+  const [linkedClaimsOpen, setLinkedClaimsOpen] = useState(false);
   const { isPublishing: isPublishingGlobal, publishCards } = usePublishStore();
 
   const submitEmailCardsForReview = useCallback(
@@ -259,16 +355,6 @@ export function ChannelInspector() {
     removeElement(card.id, elId);
     toast.info(`${el ? el.type.charAt(0).toUpperCase() + el.type.slice(1) : "Element"} removed`);
   }, [card, removeElement]);
-
-  const handleJumpToComplianceFlag = useCallback(
-    (elementId: string) => {
-      if (!card) return;
-      selectElement(card.id, elementId);
-      focusCard(card.id);
-      pulseComplianceOnElement(card.id, elementId);
-    },
-    [card, selectElement, focusCard, pulseComplianceOnElement],
-  );
 
   // Group inspector panel
   const selectedGroup = selectedGroupId ? cardGroups.find((g) => g.id === selectedGroupId) ?? null : null;
@@ -909,9 +995,16 @@ export function ChannelInspector() {
         </div>
 
         {/* Header */}
-        <div className="flex h-[44px] shrink-0 items-center justify-between border-b border-[var(--border)] px-4">
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <ContentTypeIcon type={card.channel} size="sm" />
+        <div
+          className={cn(
+            "flex shrink-0 items-center justify-between border-b border-[var(--border)] px-4",
+            regulatedCanvas ? "min-h-[52px] py-2" : "h-[44px]",
+          )}
+        >
+          <div className={cn("flex gap-2 min-w-0 flex-1", regulatedCanvas ? "items-start" : "items-center")}>
+            <div className={cn(regulatedCanvas && "mt-0.5")}>
+              <ContentTypeIcon type={card.channel} size="sm" />
+            </div>
             {isEditingHeaderTitle ? (
               <input
                 autoFocus
@@ -931,10 +1024,40 @@ export function ChannelInspector() {
                 className="min-w-0 flex-1 h-7 px-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[13px] font-semibold text-[var(--text-primary)] outline-none focus:border-neutral-400"
               />
             ) : (
-              <span className="text-[13px] font-semibold text-[var(--text-primary)] truncate">{card.title}</span>
+              <div className="min-w-0 flex-1">
+                <span className="block truncate text-[13px] font-semibold text-[var(--text-primary)]">{card.title}</span>
+                {regulatedCanvas && (
+                  <div className="mt-1 mb-0.5 flex items-center gap-1.5">
+                    <span className="group relative inline-flex">
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700"
+                        aria-label={`${frameComplianceCount} compliance flags on this frame`}
+                      >
+                        <ComplianceFlagIcon className="h-3 w-3" />
+                        {frameComplianceCount}
+                      </span>
+                      <span className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden whitespace-nowrap rounded-md bg-[var(--text-primary)] px-2 py-1 text-[10px] font-medium text-white shadow-lg group-hover:block">
+                        Compliance flags on this frame
+                      </span>
+                    </span>
+                    <span className="group relative inline-flex">
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700"
+                        aria-label={`${frameRecommendationCount} AI suggestions available on this frame`}
+                      >
+                        <SparklesMiniIcon className="h-3 w-3" />
+                        {frameRecommendationCount}
+                      </span>
+                      <span className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden whitespace-nowrap rounded-md bg-[var(--text-primary)] px-2 py-1 text-[10px] font-medium text-white shadow-lg group-hover:block">
+                        AI suggestions available on this frame
+                      </span>
+                    </span>
+                  </div>
+                )}
+              </div>
             )}
           </div>
-          <div className="flex items-center gap-1 flex-shrink-0">
+          <div className={cn("flex items-center gap-1 flex-shrink-0", regulatedCanvas && "self-start -mt-0.5")}>
             {/* 3-dot actions menu */}
             {!inspectorReadOnly && (
             <div ref={actionsRef} className="relative">
@@ -1030,51 +1153,6 @@ export function ChannelInspector() {
             <>
             {regulatedCanvas && !selectedVariantId ? (
             <>
-              <div className="sticky top-0 z-[5] shrink-0 border-b border-[var(--border)] bg-[var(--surface)] px-4 pb-3 pt-3">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-2">
-                  Compliance flags
-                </p>
-                {regulatedFlagRows.length === 0 ? (
-                  <p className="text-[12px] text-[var(--text-muted)]">
-                    No open issues on intro or closing blocks.
-                  </p>
-                ) : (
-                  <ul className="space-y-3">
-                    {regulatedFlagRows.map((row) => (
-                      <li key={row.elementId} className="flex gap-2.5">
-                        <button
-                          type="button"
-                          onClick={() => handleJumpToComplianceFlag(row.elementId)}
-                          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border-2 border-amber-500 bg-amber-50 text-amber-800 shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98]"
-                          title="Show this area on the canvas"
-                          aria-label={`Focus canvas on ${row.blockLabel}`}
-                        >
-                          <ComplianceFlagIcon className="h-4 w-4" />
-                        </button>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-[12px] font-semibold text-[var(--text-primary)]">{REGULATED_FLAG_VIOLATION_TITLE}</p>
-                          <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-                            {row.blockLabel}
-                          </p>
-                          <p className="mt-1 text-[11px] leading-snug text-[var(--text-muted)]">{row.detail}</p>
-                          {row.hasCreator && !inspectorReadOnly && (
-                            <button
-                              type="button"
-                              className="mt-1.5 text-[11px] font-semibold text-amber-900 underline decoration-amber-400/80 hover:text-amber-950"
-                              onClick={() => toggleCreatorComplianceFlag(elementKey(card.id, row.elementId))}
-                            >
-                              Clear handoff flag
-                            </button>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-              {element && (
-                <InlineClaimsSuggestions card={card} element={element} readOnly={inspectorReadOnly} />
-              )}
               <div className="shrink-0 border-b border-[var(--border)]">
                 <button
                   type="button"
@@ -1098,10 +1176,10 @@ export function ChannelInspector() {
                   />
                 </button>
                 {regulatedContentDetailsOpen && (
-                  <div className="border-t border-[var(--border)]">
+                  <div>
                     {inspectorReadOnly ? (
                       <>
-                        <div className="px-4 py-3 border-b border-[var(--border)]">
+                        <div className="px-4 py-3">
                           <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-1.5 block">Status</label>
                           <StatusBadge status={card.status} size="sm" />
                         </div>
@@ -1109,7 +1187,7 @@ export function ChannelInspector() {
                         {card.channel === "email" && (
                           <InspectorReadOnlyValue label="Subject Line" value={card.subjectLine ?? ""} />
                         )}
-                        <div className="px-4 py-3 border-b border-[var(--border)]">
+                        <div className="px-4 py-3">
                           <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-1.5 block">Tags</label>
                           <TagsEditor tags={card.tags ?? []} onChange={() => {}} readOnly allTags={[]} />
                         </div>
@@ -1121,7 +1199,7 @@ export function ChannelInspector() {
                           const segments = charCount === 0 ? 0 : charCount <= maxSingle ? 1 : Math.ceil(charCount / segmentSize);
                           const ratio = Math.min(charCount / maxSingle, 1);
                           return (
-                            <div className="px-4 py-3 border-b border-[var(--border)]">
+                            <div className="px-4 py-3">
                               <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-2 block">Character Count</label>
                               <div className="flex items-center gap-3">
                                 <SmsCharRing ratio={ratio} over={charCount > maxSingle} />
@@ -1146,7 +1224,7 @@ export function ChannelInspector() {
                       </>
                     ) : (
                     <>
-                    <div className="px-4 py-3 border-b border-[var(--border)]">
+                    <div className="px-4 py-3">
                       <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-1.5 block">Status</label>
                       {card.status === "published" ? (
                         <div className="w-full h-8 px-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] text-[13px] font-medium text-[var(--text-secondary)] flex items-center cursor-not-allowed">
@@ -1166,7 +1244,7 @@ export function ChannelInspector() {
                         </select>
                       )}
                     </div>
-                    <div className="px-4 py-3 border-b border-[var(--border)]">
+                    <div className="px-4 py-3">
                       <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-1.5 block">Title</label>
                       <input
                         type="text"
@@ -1177,7 +1255,7 @@ export function ChannelInspector() {
                       />
                     </div>
                     {card.channel === "email" && (
-                      <div className="px-4 py-3 border-b border-[var(--border)]">
+                      <div className="px-4 py-3">
                         <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-1.5 block">Subject Line</label>
                         <input
                           type="text"
@@ -1188,7 +1266,7 @@ export function ChannelInspector() {
                         />
                       </div>
                     )}
-                    <div className="px-4 py-3 border-b border-[var(--border)]">
+                    <div className="px-4 py-3">
                       <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-1.5 block">Tags</label>
                       <TagsEditor
                         tags={card.tags ?? []}
@@ -1231,12 +1309,38 @@ export function ChannelInspector() {
                   </div>
                 )}
               </div>
+              <div className="shrink-0 border-b border-[var(--border)]">
+                <button
+                  type="button"
+                  onClick={() => setLinkedClaimsOpen((o) => !o)}
+                  className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left transition-colors hover:bg-[var(--surface-hover)]"
+                  aria-expanded={linkedClaimsOpen}
+                >
+                  <div className="min-w-0">
+                    <span className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)]">
+                      Linked claims
+                    </span>
+                    <span className="mt-0.5 block truncate text-[11px] text-[var(--text-muted)]">
+                      Claims linked from the claims library to this content
+                    </span>
+                  </div>
+                  <InspectorChevronIcon
+                    className={cn(
+                      "h-4 w-4 shrink-0 text-[var(--text-muted)] transition-transform duration-200",
+                      linkedClaimsOpen && "rotate-180",
+                    )}
+                  />
+                </button>
+                {linkedClaimsOpen && (
+                  <LinkedClaimsSection claims={linkedClaims} onClaimClick={handleLinkedClaimClick} />
+                )}
+              </div>
             </>
             ) : (
             <>
               {inspectorReadOnly ? (
                 <>
-                  <div className="px-4 py-3 border-b border-[var(--border)]">
+                  <div className="px-4 py-3">
                     <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-1.5 block">Status</label>
                     <StatusBadge status={card.status} size="sm" />
                   </div>
@@ -1244,7 +1348,7 @@ export function ChannelInspector() {
                   {card.channel === "email" && (
                     <InspectorReadOnlyValue label="Subject Line" value={card.subjectLine ?? ""} />
                   )}
-                  <div className="px-4 py-3 border-b border-[var(--border)]">
+                  <div className="px-4 py-3">
                     <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-1.5 block">Tags</label>
                     <TagsEditor tags={card.tags ?? []} onChange={() => {}} readOnly allTags={[]} />
                   </div>
@@ -1256,7 +1360,7 @@ export function ChannelInspector() {
                     const segments = charCount === 0 ? 0 : charCount <= maxSingle ? 1 : Math.ceil(charCount / segmentSize);
                     const ratio = Math.min(charCount / maxSingle, 1);
                     return (
-                      <div className="px-4 py-3 border-b border-[var(--border)]">
+                    <div className="px-4 py-3">
                         <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-2 block">Character Count</label>
                         <div className="flex items-center gap-3">
                           <SmsCharRing ratio={ratio} over={charCount > maxSingle} />
@@ -1278,13 +1382,10 @@ export function ChannelInspector() {
                   <div className="px-4 pb-3 pt-2">
                     <RegulatedContentProfilePanel hideHeading readOnly />
                   </div>
-                  {regulatedCanvas && element && (
-                    <InlineClaimsSuggestions card={card} element={element} readOnly />
-                  )}
                 </>
               ) : (
                 <>
-              <div className="px-4 py-3 border-b border-[var(--border)]">
+              <div className="px-4 py-3">
                 <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-1.5 block">Status</label>
                 {card.status === "published" ? (
                   <div className="w-full h-8 px-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] text-[13px] font-medium text-[var(--text-secondary)] flex items-center cursor-not-allowed">
@@ -1304,7 +1405,7 @@ export function ChannelInspector() {
                   </select>
                 )}
               </div>
-              <div className="px-4 py-3 border-b border-[var(--border)]">
+              <div className="px-4 py-3">
                 <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-1.5 block">Title</label>
                 <input
                   type="text"
@@ -1316,7 +1417,7 @@ export function ChannelInspector() {
               </div>
               {card.channel === "email" && (
                 <>
-                  <div className="px-4 py-3 border-b border-[var(--border)]">
+                  <div className="px-4 py-3">
                     <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-1.5 block">Subject Line</label>
                     <input
                       type="text"
@@ -1328,7 +1429,7 @@ export function ChannelInspector() {
                   </div>
                 </>
               )}
-              <div className="px-4 py-3 border-b border-[var(--border)]">
+              <div className="px-4 py-3">
                 <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-1.5 block">Tags</label>
                 <TagsEditor
                   tags={card.tags ?? []}
@@ -1344,7 +1445,7 @@ export function ChannelInspector() {
                 const segments = charCount === 0 ? 0 : charCount <= maxSingle ? 1 : Math.ceil(charCount / segmentSize);
                 const ratio = Math.min(charCount / maxSingle, 1);
                 return (
-                  <div className="px-4 py-3 border-b border-[var(--border)]">
+                  <div className="px-4 py-3">
                     <label className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)] mb-2 block">Character Count</label>
                     <div className="flex items-center gap-3">
                       <SmsCharRing ratio={ratio} over={charCount > maxSingle} />
@@ -1363,9 +1464,6 @@ export function ChannelInspector() {
                   </div>
                 );
               })()}
-              {regulatedCanvas && element && (
-                <InlineClaimsSuggestions card={card} element={element} />
-              )}
                 </>
               )}
             </>
@@ -1409,40 +1507,100 @@ export function ChannelInspector() {
                   <div className="space-y-0.5">
                     {card.elements.map((el, idx) => {
                       const isActive = selectedElement?.elementId === el.id;
+                      const elComplianceCount = complianceCountByElement.get(el.id) ?? 0;
+                      const elRecommendationCount = recommendationCountByElement.get(el.id) ?? 0;
+                      const elementFlagRows = regulatedFlagRows.filter((r) => r.elementId === el.id);
                       return (
                         <div
                           key={el.id}
-                          draggable={!inspectorReadOnly}
-                          onDragStart={inspectorReadOnly ? undefined : () => { dragItem.current = idx; }}
-                          onDragEnter={inspectorReadOnly ? undefined : () => { dragOverItem.current = idx; }}
-                          onDragEnd={inspectorReadOnly ? undefined : handleReorder}
-                          onDragOver={inspectorReadOnly ? undefined : (e) => e.preventDefault()}
-                          onClick={() => selectElement(card.id, el.id)}
-                          className={cn(
-                            "group flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors",
-                            isActive ? "bg-[var(--surface-active)] shadow-sm" : "hover:bg-[var(--surface-hover)]",
-                          )}
+                          className="space-y-2"
                         >
-                          <div className="relative flex-shrink-0 w-4 h-4 flex items-center justify-center">
-                            <ContentTypeIcon type={el.type} size="sm" className={cn(!inspectorReadOnly && "group-hover:opacity-0 transition-opacity")} />
-                            {!inspectorReadOnly && (
-                            <GripIcon className="w-4 h-4 text-[var(--text-primary)] absolute inset-0 cursor-grab opacity-0 group-hover:opacity-100 transition-opacity" />
+                          <div
+                            draggable={!inspectorReadOnly}
+                            onDragStart={inspectorReadOnly ? undefined : () => { dragItem.current = idx; }}
+                            onDragEnter={inspectorReadOnly ? undefined : () => { dragOverItem.current = idx; }}
+                            onDragEnd={inspectorReadOnly ? undefined : handleReorder}
+                            onDragOver={inspectorReadOnly ? undefined : (e) => e.preventDefault()}
+                            onClick={() => {
+                              if (isActive) {
+                                selectVariant(card.id, null);
+                              } else {
+                                selectElement(card.id, el.id);
+                              }
+                            }}
+                            className={cn(
+                              "group flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors",
+                              isActive ? "bg-[var(--surface-active)] shadow-sm" : "hover:bg-[var(--surface-hover)]",
                             )}
-                          </div>
-                          <span className={cn("text-[13px] font-medium truncate flex-1 min-w-0", isActive ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]")}>
-                            {ELEMENT_TYPES.find((t) => t.type === el.type)?.label ?? el.type}
-                          </span>
-                          {!inspectorReadOnly && (
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); handleRemoveElement(el.id); }}
-                            className="w-5 h-5 flex items-center justify-center rounded text-[var(--text-muted)] hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100 flex-shrink-0"
-                            title="Delete element"
                           >
-                            <TrashIcon className="w-3 h-3" />
-                          </button>
+                            <div className="relative flex-shrink-0 w-4 h-4 flex items-center justify-center">
+                              <ContentTypeIcon type={el.type} size="sm" className={cn(!inspectorReadOnly && "group-hover:opacity-0 transition-opacity")} />
+                              {!inspectorReadOnly && (
+                              <GripIcon className="w-4 h-4 text-[var(--text-primary)] absolute inset-0 cursor-grab opacity-0 group-hover:opacity-100 transition-opacity" />
+                              )}
+                            </div>
+                            <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                              <span className={cn("text-[13px] font-medium truncate min-w-0", isActive ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]")}>
+                                {ELEMENT_TYPES.find((t) => t.type === el.type)?.label ?? el.type}
+                              </span>
+                              {regulatedCanvas && elComplianceCount > 0 && (
+                                <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                                  <ComplianceFlagIcon className="h-3 w-3" />
+                                  {elComplianceCount}
+                                </span>
+                              )}
+                              {regulatedCanvas && elRecommendationCount > 0 && (
+                                <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">
+                                  <SparklesMiniIcon className="h-3 w-3" />
+                                  {elRecommendationCount}
+                                </span>
+                              )}
+                            </div>
+                            {!inspectorReadOnly && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleRemoveElement(el.id); }}
+                              className="w-5 h-5 flex items-center justify-center rounded text-[var(--text-muted)] hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100 flex-shrink-0"
+                              title="Delete element"
+                            >
+                              <TrashIcon className="w-3 h-3" />
+                            </button>
+                            )}
+                            <ElementLinkButton cardId={card.id} elementType={el.type} cards={cards} />
+                          </div>
+                          {regulatedCanvas && isActive && (
+                            <div className="px-1 space-y-2">
+                              {elementFlagRows.length > 0 && (
+                                <div className="rounded-lg border border-amber-500/90 bg-white/90 p-2.5 shadow-sm">
+                                  <p className="mb-1 inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-amber-900/80">
+                                    <ComplianceFlagIcon className="h-3.5 w-3.5" />
+                                    Compliance flags ({elementFlagRows.length})
+                                  </p>
+                                  <ul className="space-y-2">
+                                    {elementFlagRows.map((row) => (
+                                      <li key={`asset-flag-${row.elementId}`}>
+                                        <p className="text-[12px] font-semibold text-[var(--text-primary)]">{REGULATED_FLAG_VIOLATION_TITLE}</p>
+                                        <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">{row.blockLabel}</p>
+                                        <p className="mt-1 text-[11px] leading-snug text-[var(--text-muted)]">{row.detail}</p>
+                                        {row.hasScanIssue && row.dismissible && !inspectorReadOnly && (
+                                          <button
+                                            type="button"
+                                            className="mt-2 rounded-md border border-[var(--border)] bg-white px-2.5 py-1 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"
+                                            onClick={() => dismissComplianceFlag(elementKey(card.id, row.elementId))}
+                                          >
+                                            Dismiss
+                                          </button>
+                                        )}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                              {elRecommendationCount > 0 && (
+                                <InlineClaimsSuggestions card={card} element={el} readOnly={inspectorReadOnly} />
+                              )}
+                            </div>
                           )}
-                          <ElementLinkButton cardId={card.id} elementType={el.type} cards={cards} />
                         </div>
                       );
                     })}
@@ -1763,6 +1921,101 @@ function SmsCharRing({ ratio, over }: { ratio: number; over: boolean }) {
     <svg width={size} height={size} className="-rotate-90 flex-shrink-0">
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#f3f4f6" strokeWidth={stroke} />
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round" className="transition-all duration-200" />
+    </svg>
+  );
+}
+
+function SparklesMiniIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 32 32" fill="none" aria-hidden>
+      <path
+        d="M30.1565 17.0329L24.178 20.0151C22.3802 20.9066 20.9333 22.3639 20.0343 24.1531L17.0482 30.1174C16.6233 30.9659 15.4042 30.9659 14.9794 30.1174L11.9932 24.1531C11.1005 22.3639 9.64123 20.9128 7.84953 20.0151L1.88335 17.0329C1.03368 16.6087 1.03368 15.3912 1.88335 14.967L7.86185 11.9848C9.6597 11.0933 11.1066 9.63602 12.0055 7.84674L14.9856 1.88249C15.4104 1.03396 16.6295 1.03396 17.0543 1.88249L20.0405 7.84674C20.9333 9.63602 22.3925 11.0871 24.1842 11.9848L30.1627 14.967C31.0124 15.3912 31.0124 16.6087 30.1627 17.0329H30.1565Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function LinkedClaimsSection({
+  claims,
+  onClaimClick,
+}: {
+  claims: {
+    id: string;
+    elementId: string;
+    blockLabel: string;
+    code: string;
+    status: "approved" | "draft" | "retired";
+    body: string | null;
+    references: { id: string; label: string; anchorCount: number; href?: string }[];
+  }[];
+  onClaimClick: (elementId: string) => void;
+}) {
+  return (
+    <div className="px-4 py-3">
+      {claims.length === 0 ? (
+        <p className="text-[12px] text-[var(--text-muted)]">No claims linked to this frame yet.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {claims.map((claim) => (
+            <li key={claim.id} className="rounded-md border border-indigo-100 bg-indigo-50/50 px-2.5 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => onClaimClick(claim.elementId)}
+                  className="inline-flex items-center gap-1 text-[11px] font-mono font-semibold text-indigo-800 underline underline-offset-2 hover:text-indigo-900"
+                  title={`Focus linked claim in ${claim.blockLabel}`}
+                >
+                  <LinkedClaimShieldIcon className="h-3 w-3" />
+                  {claim.code}
+                </button>
+                <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+                  Approved Claim
+                </span>
+              </div>
+              {claim.body && (
+                <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-[var(--text-muted)]">{claim.body}</p>
+              )}
+              <details className="mt-1.5">
+                <summary className="cursor-pointer list-none text-[11px] font-semibold text-indigo-700 underline decoration-dotted underline-offset-2 hover:text-indigo-800">
+                  References
+                </summary>
+                <div className="mt-1 rounded-md border border-indigo-100 bg-indigo-50/40 px-2 py-1.5">
+                  <ul className="space-y-0.5">
+                    {claim.references.map((reference) => (
+                      <li key={reference.id}>
+                        <a
+                          href={reference.href ?? "#"}
+                          onClick={(e) => {
+                            if (!reference.href) e.preventDefault();
+                          }}
+                          className="text-[11px] font-medium text-indigo-800 hover:text-indigo-900"
+                        >
+                          <span className="underline underline-offset-2">{reference.label}</span>
+                          <span> ({reference.anchorCount})</span>
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </details>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function LinkedClaimShieldIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 32 32" fill="none" aria-hidden>
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M2.95373 8.61543H29.046C29.6614 8.61543 30.1537 8.00004 29.9691 7.38465C29.3537 5.35388 28.4922 3.50771 27.323 1.84617C26.9537 1.35386 26.2768 1.29232 25.9076 1.72309C24.7384 2.83079 23.0768 3.44618 21.3537 3.44618C19.5076 3.44618 17.846 2.70771 16.6153 1.47694C16.246 1.1077 15.6307 1.1077 15.2614 1.47694C14.0307 2.70771 12.3691 3.44618 10.523 3.44618C8.79989 3.44618 7.19989 2.83079 5.96912 1.72309C5.53835 1.35386 4.86143 1.4154 4.55373 1.84617C3.3845 3.44617 2.46143 5.35388 1.90758 7.38465C1.84604 8.00004 2.33835 8.61543 2.95373 8.61543V8.61543ZM30.7692 12.5539C30.7692 12 30.3384 11.6923 29.7846 11.6923H2.21533C1.66148 11.6923 1.23071 12 1.23071 12.5539V12.7385C1.23071 21.9693 7.63071 29.6001 15.9999 30.7693C24.3692 29.6001 30.7692 21.9693 30.7692 12.8V12.5539V12.5539Z"
+        fill="currentColor"
+      />
     </svg>
   );
 }
@@ -2313,7 +2566,13 @@ function VariantElementsList({
                 onDragEnter={readOnly ? undefined : () => { dragOverItem.current = idx; }}
                 onDragEnd={readOnly ? undefined : handleReorder}
                 onDragOver={readOnly ? undefined : (e) => e.preventDefault()}
-                onClick={() => selectElement(card.id, el.id)}
+                onClick={() => {
+                  if (isActive) {
+                    selectVariant(card.id, null);
+                  } else {
+                    selectElement(card.id, el.id);
+                  }
+                }}
                 className={cn(
                   "group flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors",
                   isActive ? "bg-[var(--surface-active)] shadow-sm" : "hover:bg-[var(--surface-hover)]",

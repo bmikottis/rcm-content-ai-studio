@@ -14,12 +14,12 @@ export function regulatedEmailChromeAnchors(elements: ContentElement[]): {
   const claimHintIds = new Set<string>();
   if (firstBody) claimHintIds.add(firstBody.id);
   else if (firstHeadline) claimHintIds.add(firstHeadline.id);
-  if (firstImage) claimHintIds.add(firstImage.id);
 
   const flagIds = new Set<string>();
   if (firstBody) flagIds.add(firstBody.id);
   if (lastBody) flagIds.add(lastBody.id);
   if (!firstBody && firstHeadline) flagIds.add(firstHeadline.id);
+  if (firstImage) flagIds.add(firstImage.id);
 
   return { claimHintIds, flagIds };
 }

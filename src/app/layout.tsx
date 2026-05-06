@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import "./globals.css";
 import { Poppins } from "next/font/google";
 import { AuthProvider } from "@/components/providers/AuthProvider";
@@ -43,11 +44,9 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${poppins.variable} h-full`} suppressHydrationWarning>
       <head>
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem("palette-theme");if(t==="dark"||(t==="system"&&window.matchMedia("(prefers-color-scheme:dark)").matches)){document.documentElement.dataset.theme="dark"}}catch(e){}})()`,
-          }}
-        />
+        <Script id="palette-theme-init" strategy="beforeInteractive">
+          {`(function(){try{var t=localStorage.getItem("palette-theme");if(t==="dark"||(t==="system"&&window.matchMedia("(prefers-color-scheme:dark)").matches)){document.documentElement.dataset.theme="dark"}}catch(e){}})()`}
+        </Script>
         <style
           dangerouslySetInnerHTML={{ __html: customFontFaceCss(publicAssetBase) }}
         />
