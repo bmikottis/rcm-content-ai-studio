@@ -19,6 +19,9 @@ export interface ApprovedClaim {
   code: string;
   title: string;
   body: string;
+  status: "approved" | "draft" | "retired";
+  recommendationReasoning: string;
+  references: { id: string; label: string; anchorCount: number; href?: string }[];
   audiences: RegulatedAudience[];
   regions: RegulatedRegion[];
   intents: RegulatedIntent[];
@@ -35,6 +38,16 @@ export const APPROVED_CLAIMS: ApprovedClaim[] = [
     title: "MOA — pathway framing",
     body:
       "ONCURA® (oncurimab) is a humanized monoclonal antibody designed to bind its target with high specificity, supporting tumor microenvironment modulation as described in the approved prescribing information.",
+    status: "approved",
+    recommendationReasoning:
+      "Recommended because this block is educational HCP email copy in US/global context and needs a label-aligned mechanism statement for early body content.",
+    references: [
+      {
+        id: "oncura-pi-us-v3-2",
+        label: "ONCURA US Prescribing Information v3.2",
+        anchorCount: 4,
+      },
+    ],
     audiences: ["hcp"],
     regions: ["us", "global"],
     intents: ["educational", "promotional"],
@@ -48,6 +61,16 @@ export const APPROVED_CLAIMS: ApprovedClaim[] = [
     title: "Efficacy framing (label-aligned placeholder)",
     body:
       "Efficacy results, study design, and endpoint hierarchy must mirror the approved label and MLR-stamped slide deck. Replace this claim with verbatim approved language before use.",
+    status: "approved",
+    recommendationReasoning:
+      "Recommended when efficacy framing is needed but generated copy is missing explicit label alignment reminders for medical/legal review.",
+    references: [
+      {
+        id: "oncura-core-slide-deck-mlr",
+        label: "ONCURA MLR Approved Core Deck",
+        anchorCount: 3,
+      },
+    ],
     audiences: ["hcp"],
     regions: ["us", "eu_uk", "global"],
     intents: ["educational", "promotional"],
@@ -61,6 +84,16 @@ export const APPROVED_CLAIMS: ApprovedClaim[] = [
     title: "ISI anchor line",
     body:
       "IMPORTANT SAFETY INFORMATION: [Insert boxed warning, contraindications, warnings and precautions, and adverse reactions per local label]. Please see full Prescribing Information for ONCURA® (oncurimab).",
+    status: "approved",
+    recommendationReasoning:
+      "Recommended because this content type frequently requires an ISI anchor for fair-balance and this block position supports required safety framing.",
+    references: [
+      {
+        id: "oncura-isi-template-us",
+        label: "ONCURA ISI Template (US) - Approved",
+        anchorCount: 5,
+      },
+    ],
     audiences: ["hcp", "patient"],
     regions: ["us", "global"],
     intents: ["promotional", "educational", "reminder"],
@@ -74,6 +107,16 @@ export const APPROVED_CLAIMS: ApprovedClaim[] = [
     title: "EU — SmPC reference",
     body:
       "For healthcare professionals in the EU: refer to the Summary of Product Characteristics (SmPC) before prescribing. Local requirements may differ from US labeling.",
+    status: "approved",
+    recommendationReasoning:
+      "Recommended for EU/UK profile to ensure region-specific SmPC language is surfaced instead of US-only labeling references.",
+    references: [
+      {
+        id: "oncura-smpc-eu",
+        label: "ONCURA SmPC (EU/UK)",
+        anchorCount: 2,
+      },
+    ],
     audiences: ["hcp"],
     regions: ["eu_uk"],
     intents: ["educational", "promotional"],
@@ -86,6 +129,16 @@ export const APPROVED_CLAIMS: ApprovedClaim[] = [
     code: "ONCURA-VIS-01",
     title: "Approved visual — mechanism schematic",
     body: "Use only the MLR-approved mechanism schematic (version 3.2 or later) from the digital asset library. Do not crop mandatory footnotes.",
+    status: "approved",
+    recommendationReasoning:
+      "Recommended for image blocks in regulated email so creative teams use approved mechanism visuals with required footnotes intact.",
+    references: [
+      {
+        id: "oncura-dam-mech-v3-2",
+        label: "ONCURA DAM Asset: Mechanism Schematic v3.2",
+        anchorCount: 3,
+      },
+    ],
     audiences: ["hcp"],
     regions: ["us", "eu_uk", "global"],
     intents: ["educational", "promotional"],
@@ -171,6 +224,7 @@ export function filterClaimsForContext(params: {
   if (elementType === "divider") return [];
 
   return APPROVED_CLAIMS.filter((c) => {
+    if (c.status !== "approved") return false;
     if (dismissedIds.includes(c.id)) return false;
     if (!c.audiences.includes(profile.audience)) return false;
     if (!regionMatches(c.regions, profile.region)) return false;
