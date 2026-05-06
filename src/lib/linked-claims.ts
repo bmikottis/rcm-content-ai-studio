@@ -31,12 +31,14 @@ function escapeRegex(value: string): string {
 }
 
 export function extractVisibleLinkedClaimCodes(
-  element: Pick<ContentElement, "content" | "linkedClaimCodes">,
+  element: Pick<ContentElement, "content" | "linkedClaimCodes" | "linkedClaimAdjustments">,
   approvedClaims: { code: string; body: string }[],
 ): string[] {
   const claimsByCode = new Map(approvedClaims.map((claim) => [claim.code, claim.body]));
+  const adjustedCodes = new Set(Object.keys(element.linkedClaimAdjustments ?? {}));
   const codes = extractLinkedClaimCodes(element);
   return codes.filter((code) => {
+    if (adjustedCodes.has(code)) return true;
     const stampPattern = new RegExp(`\\[Approved claim\\s+${escapeRegex(code)}\\]`, "i");
     if (stampPattern.test(element.content)) return true;
     const body = claimsByCode.get(code);

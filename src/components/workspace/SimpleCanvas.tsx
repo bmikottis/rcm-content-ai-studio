@@ -1335,6 +1335,12 @@ function EditableElement({
 }: EditableElementProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(element.content);
+  const [claimVariationPrompt, setClaimVariationPrompt] = useState<{
+    nextContent: string;
+    claimCodes: string[];
+  } | null>(null);
+  const [claimVariationComment, setClaimVariationComment] = useState("");
+  const [claimVariationError, setClaimVariationError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
   const isEmail = channel === "email";
 
@@ -1380,11 +1386,16 @@ function EditableElement({
   const showComplianceFlagBadge =
     regulated && regulatedFlagAnchor && element.type !== "divider" && (isCreatorFlagged || hasFlagScanIssue);
 
-  const { selectedElement, selectElement, clearImageVariations, focusedLinkedClaimCode } = useSimpleCanvasStore();
+  const { selectedElement, selectElement, clearImageVariations, focusedLinkedClaimCode, updateElement } = useSimpleCanvasStore();
   const compliancePulseKey = useSimpleCanvasStore((s) => s.compliancePulseKey);
   const isImageSelected = selectedElement?.cardId === cardId && selectedElement?.elementId === element.id;
   const isElementSelected = selectedElement?.cardId === cardId && selectedElement?.elementId === element.id;
   const isTextElement = element.type === "headline" || element.type === "body" || element.type === "cta";
+  const adjustedLinkedClaimCount = useMemo(
+    () => linkedClaimCodes.filter((code) => Boolean(element.linkedClaimAdjustments?.[code])).length,
+    [linkedClaimCodes, element.linkedClaimAdjustments],
+  );
+  const hasAdjustedLinkedClaims = adjustedLinkedClaimCount > 0;
   const renderedContent = useMemo(() => stripApprovedClaimStamps(element.content), [element.content]);
   const linkedClaimHighlightedContent = useMemo(() => {
     if (linkedClaimCodes.length === 0) return null;
@@ -1500,9 +1511,69 @@ function EditableElement({
 
   const handleFinishEdit = () => {
     setIsEditing(false);
-    if (editValue.trim() !== element.content) {
-      onChange(editValue.trim());
+    const nextContent = editValue.trim();
+    if (nextContent !== element.content) {
+      if (linkedClaimCodes.length > 0 && isTextElement) {
+        setClaimVariationComment("");
+        setClaimVariationError(null);
+        setClaimVariationPrompt({
+          nextContent,
+          claimCodes: [...linkedClaimCodes],
+        });
+        return;
+      }
+      onChange(nextContent);
     }
+  };
+
+  const handleKeepClaimVariation = () => {
+    if (!claimVariationPrompt) return;
+    const comment = claimVariationComment.trim();
+    if (!comment) {
+      setClaimVariationError("Please add a reason for this wording change.");
+      return;
+    }
+    const nextAdjustments = { ...(element.linkedClaimAdjustments ?? {}) };
+    for (const code of claimVariationPrompt.claimCodes) {
+      const base = APPROVED_CLAIMS.find((c) => c.code === code);
+      nextAdjustments[code] = {
+        status: "pending_variation_review",
+        comment,
+        originalText: base?.body ?? "",
+        editedText: claimVariationPrompt.nextContent,
+        updatedAt: Date.now(),
+      };
+    }
+    updateElement(cardId, element.id, {
+      content: claimVariationPrompt.nextContent,
+      linkedClaimCodes: Array.from(new Set([...(element.linkedClaimCodes ?? []), ...claimVariationPrompt.claimCodes])),
+      linkedClaimAdjustments: nextAdjustments,
+    });
+    setClaimVariationPrompt(null);
+    setClaimVariationComment("");
+    setClaimVariationError(null);
+  };
+
+  const handleUnlinkClaimAndSave = () => {
+    if (!claimVariationPrompt) return;
+    const remainingCodes = (element.linkedClaimCodes ?? []).filter((c) => !claimVariationPrompt.claimCodes.includes(c));
+    const nextAdjustments = { ...(element.linkedClaimAdjustments ?? {}) };
+    for (const code of claimVariationPrompt.claimCodes) delete nextAdjustments[code];
+    updateElement(cardId, element.id, {
+      content: claimVariationPrompt.nextContent,
+      linkedClaimCodes: remainingCodes.length > 0 ? remainingCodes : undefined,
+      linkedClaimAdjustments: Object.keys(nextAdjustments).length > 0 ? nextAdjustments : undefined,
+    });
+    setClaimVariationPrompt(null);
+    setClaimVariationComment("");
+    setClaimVariationError(null);
+  };
+
+  const handleCancelClaimVariation = () => {
+    setEditValue(element.content);
+    setClaimVariationPrompt(null);
+    setClaimVariationComment("");
+    setClaimVariationError(null);
   };
 
   // Click outside to deselect
@@ -1599,8 +1670,15 @@ function EditableElement({
           )}
           {hasLinkedClaims && (
             <div
-              className="flex h-[22px] min-w-[22px] items-center justify-center gap-0.5 rounded-full bg-indigo-100 px-1 text-[10px] font-bold text-indigo-800 shadow-md ring-2 ring-white"
-              title={`Linked claim${linkedClaimCodes.length === 1 ? "" : "s"}: ${linkedClaimCodes.join(", ")}`}
+              className={cn(
+                "flex h-[22px] min-w-[22px] items-center justify-center gap-0.5 rounded-full px-1 text-[10px] font-bold shadow-md ring-2 ring-white",
+                hasAdjustedLinkedClaims ? "bg-amber-100 text-amber-800" : "bg-indigo-100 text-indigo-800",
+              )}
+              title={
+                hasAdjustedLinkedClaims
+                  ? `${adjustedLinkedClaimCount} linked claim variation${adjustedLinkedClaimCount === 1 ? "" : "s"} pending review`
+                  : `Linked claim${linkedClaimCodes.length === 1 ? "" : "s"}: ${linkedClaimCodes.join(", ")}`
+              }
               aria-label={`${linkedClaimCodes.length} linked claim annotations`}
             >
               {linkedClaimCodes.length}
@@ -1829,7 +1907,86 @@ function EditableElement({
       {element.type === "divider" && (
         <div className="h-px bg-[var(--border-subtle)]" />
       )}
+      {claimVariationPrompt && (
+        <ClaimVariationPrompt
+          claimCodes={claimVariationPrompt.claimCodes}
+          comment={claimVariationComment}
+          error={claimVariationError}
+          onCommentChange={(value) => {
+            setClaimVariationComment(value);
+            if (claimVariationError) setClaimVariationError(null);
+          }}
+          onKeep={handleKeepClaimVariation}
+          onUnlink={handleUnlinkClaimAndSave}
+          onCancel={handleCancelClaimVariation}
+        />
+      )}
     </motion.div>
+  );
+}
+
+function ClaimVariationPrompt({
+  claimCodes,
+  comment,
+  error,
+  onCommentChange,
+  onKeep,
+  onUnlink,
+  onCancel,
+}: {
+  claimCodes: string[];
+  comment: string;
+  error: string | null;
+  onCommentChange: (value: string) => void;
+  onKeep: () => void;
+  onUnlink: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/35 p-4">
+      <div className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-2xl">
+        <p className="text-[14px] font-semibold text-[var(--text-primary)]">Linked claim wording changed</p>
+        <p className="mt-1 text-[12px] leading-snug text-[var(--text-muted)]">
+          Keep this content linked as a claim variation, or unlink and treat it as regular copy.
+        </p>
+        <p className="mt-2 text-[11px] font-semibold text-[var(--text-secondary)]">
+          Affected claim{claimCodes.length === 1 ? "" : "s"}: {claimCodes.join(", ")}
+        </p>
+        <label className="mt-3 block text-[11px] font-semibold text-[var(--text-secondary)]">
+          Why was wording changed?
+          <textarea
+            value={comment}
+            onChange={(e) => onCommentChange(e.target.value)}
+            placeholder="Explain why this variation is needed for reviewers..."
+            className="mt-1 h-20 w-full resize-none rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-[12px] text-[var(--text-primary)] outline-none focus:border-neutral-400"
+          />
+        </label>
+        {error && <p className="mt-1 text-[11px] font-medium text-red-500">{error}</p>}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={onKeep}
+            className="rounded-md bg-indigo-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-700"
+          >
+            Keep link + submit variation
+          </button>
+          <button
+            type="button"
+            onClick={onUnlink}
+            className="rounded-md border border-[var(--border)] bg-white px-2.5 py-1.5 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"
+          >
+            Unlink and save edit
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="ml-auto text-[11px] font-semibold text-[var(--text-muted)] underline decoration-[var(--text-muted)]/70 hover:text-[var(--text-secondary)]"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

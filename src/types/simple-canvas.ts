@@ -42,6 +42,16 @@ export interface ContentElement {
   type: "image" | "headline" | "body" | "cta" | "divider";
   content: string;
   linkedClaimCodes?: string[];
+  linkedClaimAdjustments?: Record<
+    string,
+    {
+      status: "pending_variation_review";
+      comment: string;
+      originalText: string;
+      editedText: string;
+      updatedAt: number;
+    }
+  >;
   imageData?: ImageData;
   isLoading?: boolean;
   imageVariations?: ImageVariations;

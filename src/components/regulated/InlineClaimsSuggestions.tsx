@@ -189,9 +189,12 @@ function applyClaim(
 
   if (liveElement.type === "image") {
     const nextCodes = Array.from(new Set([...(liveElement.linkedClaimCodes ?? []), claim.code]));
+    const nextAdjustments = { ...(liveElement.linkedClaimAdjustments ?? {}) };
+    delete nextAdjustments[claim.code];
     updateElement(cardId, element.id, {
       content: claim.title,
       linkedClaimCodes: nextCodes,
+      linkedClaimAdjustments: Object.keys(nextAdjustments).length ? nextAdjustments : undefined,
       imageData: {
         ...(liveElement.imageData ?? { src: "", alt: "", fit: "cover" }),
         alt: claim.body.slice(0, 220),
@@ -202,8 +205,11 @@ function applyClaim(
 
   const prefix = liveElement.content.trim() ? `${liveElement.content.trim()}\n\n` : "";
   const nextCodes = Array.from(new Set([...(liveElement.linkedClaimCodes ?? []), claim.code]));
+  const nextAdjustments = { ...(liveElement.linkedClaimAdjustments ?? {}) };
+  delete nextAdjustments[claim.code];
   updateElement(cardId, element.id, {
     content: `${prefix}${claim.body}`,
     linkedClaimCodes: nextCodes,
+    linkedClaimAdjustments: Object.keys(nextAdjustments).length ? nextAdjustments : undefined,
   });
 }

@@ -97,6 +97,8 @@ export function ChannelInspector() {
           blockLabel: ELEMENT_TYPES.find((t) => t.type === el.type)?.label ?? el.type,
           code,
           status: claim?.status ?? "approved",
+          adjusted: Boolean(el.linkedClaimAdjustments?.[code]),
+          adjustmentComment: el.linkedClaimAdjustments?.[code]?.comment ?? null,
           body: claim?.body ?? null,
           references: claim?.references ?? [],
         };
@@ -1951,6 +1953,8 @@ function LinkedClaimsSection({
     blockLabel: string;
     code: string;
     status: "approved" | "draft" | "retired";
+    adjusted?: boolean;
+    adjustmentComment?: string | null;
     body: string | null;
     references: { id: string; label: string; anchorCount: number; href?: string }[];
   }[];
@@ -1984,10 +1988,25 @@ function LinkedClaimsSection({
                   <LinkedClaimShieldIcon className="h-3 w-3" />
                   {claim.code}
                 </span>
-                <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
-                  Approved Claim
+                <span
+                  className={cn(
+                    "rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                    claim.adjusted ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700",
+                  )}
+                >
+                  {claim.adjusted ? "Adjusted Claim" : "Approved Claim"}
                 </span>
               </div>
+              {claim.adjusted && (
+                <div className="mt-1 space-y-0.5">
+                  <p className="text-[10px] font-medium text-amber-700">Variation pending review.</p>
+                  {claim.adjustmentComment && (
+                    <p className="text-[10px] text-[var(--text-muted)] line-clamp-2">
+                      Reason: {claim.adjustmentComment}
+                    </p>
+                  )}
+                </div>
+              )}
               {claim.body && (
                 <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-[var(--text-muted)]">{claim.body}</p>
               )}
