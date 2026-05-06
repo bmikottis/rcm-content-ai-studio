@@ -99,6 +99,8 @@ export function ChannelInspector() {
           status: claim?.status ?? "approved",
           adjusted: Boolean(el.linkedClaimAdjustments?.[code]),
           adjustmentComment: el.linkedClaimAdjustments?.[code]?.comment ?? null,
+          adjustmentStatus: el.linkedClaimAdjustments?.[code]?.status ?? null,
+          adjustmentEditedText: el.linkedClaimAdjustments?.[code]?.editedText ?? null,
           body: claim?.body ?? null,
           references: claim?.references ?? [],
         };
@@ -1955,6 +1957,8 @@ function LinkedClaimsSection({
     status: "approved" | "draft" | "retired";
     adjusted?: boolean;
     adjustmentComment?: string | null;
+    adjustmentStatus?: "pending_variation_review" | "linked_modified" | null;
+    adjustmentEditedText?: string | null;
     body: string | null;
     references: { id: string; label: string; anchorCount: number; href?: string }[];
   }[];
@@ -1991,24 +1995,40 @@ function LinkedClaimsSection({
                 <span
                   className={cn(
                     "rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-                    claim.adjusted ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700",
+                    "bg-emerald-50 text-emerald-700",
                   )}
                 >
-                  {claim.adjusted ? "Adjusted Claim" : "Approved Claim"}
+                  Approved Claim
                 </span>
               </div>
-              {claim.adjusted && (
-                <div className="mt-1 space-y-0.5">
-                  <p className="text-[10px] font-medium text-amber-700">Variation pending review.</p>
-                  {claim.adjustmentComment && (
-                    <p className="text-[10px] text-[var(--text-muted)] line-clamp-2">
-                      Reason: {claim.adjustmentComment}
-                    </p>
-                  )}
-                </div>
-              )}
               {claim.body && (
                 <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-[var(--text-muted)]">{claim.body}</p>
+              )}
+              {claim.adjustmentStatus === "pending_variation_review" && (
+                <details className="mt-1.5 rounded-md border border-amber-200 bg-amber-50/60 px-2 py-1.5">
+                  <summary className="list-none cursor-pointer select-none">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
+                      Variation submitted
+                    </span>
+                  </summary>
+                  <div className="mt-1.5 space-y-1.5">
+                    {claim.adjustmentComment && (
+                      <p className="text-[10px] text-[var(--text-secondary)]">
+                        <span className="font-semibold text-[var(--text-primary)]">Reason:</span> {claim.adjustmentComment}
+                      </p>
+                    )}
+                    {claim.adjustmentEditedText && (
+                      <p className="text-[10px] text-[var(--text-muted)] line-clamp-3">
+                        <span className="font-semibold text-[var(--text-primary)]">Variation text:</span> {claim.adjustmentEditedText}
+                      </p>
+                    )}
+                  </div>
+                </details>
+              )}
+              {claim.adjustmentStatus === "linked_modified" && (
+                <div className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700">
+                  Linked copy adjusted
+                </div>
               )}
               <details className="mt-1.5">
                 <summary className="cursor-pointer list-none text-[11px] font-semibold text-indigo-700 underline decoration-dotted underline-offset-2 hover:text-indigo-800">

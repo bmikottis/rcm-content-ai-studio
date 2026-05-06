@@ -45,7 +45,7 @@ export interface ContentElement {
   linkedClaimAdjustments?: Record<
     string,
     {
-      status: "pending_variation_review";
+      status: "pending_variation_review" | "linked_modified";
       comment: string;
       originalText: string;
       editedText: string;

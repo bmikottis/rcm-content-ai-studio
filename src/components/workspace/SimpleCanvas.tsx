@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useCallback, useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { createPortal } from "react-dom";
 import { useSimpleCanvasStore } from "@/stores/simple-canvas";
 import { useProgressiveGenerationStore } from "@/stores/progressive-generation";
 import { ChannelCard, CardVariant, ContentElement, ChannelType } from "@/types/simple-canvas";
@@ -711,6 +712,7 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
   // Side panel — active text element for this card
   const [rephraseOpen, setRephraseOpen] = useState(false);
   const [rephraseTargetElement, setRephraseTargetElement] = useState<ContentElement | null>(null);
+  const [rephraseSelection, setRephraseSelection] = useState<{ elementId: string; selectedText: string } | null>(null);
 
   const activeElement = useMemo(() => {
     if (!selectedElement || selectedElement.cardId !== card.id) return null;
@@ -1020,6 +1022,7 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
   return (
     <motion.div
       ref={dragRef}
+      data-card-shell="true"
       initial={{ opacity: 0, scale: 0.9, y: 20 }}
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.9 }}
@@ -1101,6 +1104,7 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
                     readOnly={isLockedInReview}
                     regulatedClaimsAnchor={regulatedEmailAnchors.claimHintIds.has(element.id)}
                     regulatedFlagAnchor={regulatedEmailAnchors.flagIds.has(element.id)}
+                    onTextSelectionChange={setRephraseSelection}
                     onChange={(newContent) => handleElementChange(element.id, newContent)}
                   />
                 </div>
@@ -1214,6 +1218,7 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
                       regulatedClaimsAnchor={variantAnchors.claimHintIds.has(element.id)}
                       regulatedFlagAnchor={variantAnchors.flagIds.has(element.id)}
                       includeComplianceScan={false}
+                      onTextSelectionChange={setRephraseSelection}
                       onChange={(newContent) => updateVariantElement(card.id, variant.id, element.id, { content: newContent })}
                     />
                   ))}
@@ -1277,7 +1282,10 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
               actions={[
                 {
                   id: "rephrase",
-                  label: "Rephrase",
+                  label:
+                    rephraseSelection && rephraseSelection.elementId === activeElement.id
+                      ? "Rephrase selected text"
+                      : "Rephrase block",
                   icon: <RephraseIcon />,
                   onClick: () => {
                     setRephraseTargetElement(activeElement);
@@ -1297,6 +1305,11 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
             cardId={card.id}
             element={rephraseTargetElement}
             channel={card.channel}
+            selectedText={
+              rephraseSelection && rephraseSelection.elementId === rephraseTargetElement.id
+                ? rephraseSelection.selectedText
+                : undefined
+            }
             onClose={() => setRephraseOpen(false)}
           />
         )}
@@ -1319,6 +1332,7 @@ interface EditableElementProps {
   includeComplianceScan?: boolean;
   /** When true, selecting still works but inline editing is disabled (e.g. content in regulatory review). */
   readOnly?: boolean;
+  onTextSelectionChange?: (selection: { elementId: string; selectedText: string } | null) => void;
   onChange: (newContent: string) => void;
 }
 
@@ -1331,17 +1345,28 @@ function EditableElement({
   regulatedFlagAnchor = false,
   includeComplianceScan = true,
   readOnly = false,
+  onTextSelectionChange,
   onChange,
 }: EditableElementProps) {
+  const elementContainerRef = useRef<HTMLDivElement | null>(null);
+  const cardShellRef = useRef<HTMLElement | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(element.content);
   const [claimVariationPrompt, setClaimVariationPrompt] = useState<{
     nextContent: string;
     claimCodes: string[];
   } | null>(null);
+  const [claimVariationPopoverPos, setClaimVariationPopoverPos] = useState<{
+    top: number;
+    left: number;
+    side: "left" | "right";
+  } | null>(null);
+  const [submitAsVariation, setSubmitAsVariation] = useState(true);
   const [claimVariationComment, setClaimVariationComment] = useState("");
   const [claimVariationError, setClaimVariationError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
+  const textContentRef = useRef<HTMLElement | null>(null);
+  const claimPromptAnchorRef = useRef<HTMLSpanElement | null>(null);
   const isEmail = channel === "email";
 
   const projectId = useCanvasStore((s) => s.projectId);
@@ -1387,6 +1412,7 @@ function EditableElement({
     regulated && regulatedFlagAnchor && element.type !== "divider" && (isCreatorFlagged || hasFlagScanIssue);
 
   const { selectedElement, selectElement, clearImageVariations, focusedLinkedClaimCode, updateElement } = useSimpleCanvasStore();
+  const viewport = useSimpleCanvasStore((s) => s.viewport);
   const compliancePulseKey = useSimpleCanvasStore((s) => s.compliancePulseKey);
   const isImageSelected = selectedElement?.cardId === cardId && selectedElement?.elementId === element.id;
   const isElementSelected = selectedElement?.cardId === cardId && selectedElement?.elementId === element.id;
@@ -1395,63 +1421,117 @@ function EditableElement({
     () => linkedClaimCodes.filter((code) => Boolean(element.linkedClaimAdjustments?.[code])).length,
     [linkedClaimCodes, element.linkedClaimAdjustments],
   );
+  const pendingVariationClaimCodes = useMemo(
+    () =>
+      linkedClaimCodes.filter(
+        (code) => element.linkedClaimAdjustments?.[code]?.status === "pending_variation_review",
+      ),
+    [linkedClaimCodes, element.linkedClaimAdjustments],
+  );
   const hasAdjustedLinkedClaims = adjustedLinkedClaimCount > 0;
+  const hasPendingVariationClaims = pendingVariationClaimCodes.length > 0;
+  const liveEditedDriftedClaimCodes = useMemo(() => {
+    if (!isEditing || linkedClaimCodes.length === 0) return [];
+    const next = editValue;
+    return linkedClaimCodes.filter((code) => {
+      const approved = APPROVED_CLAIMS.find((c) => c.code === code);
+      if (!approved) return false;
+      return !next.includes(approved.body);
+    });
+  }, [isEditing, linkedClaimCodes, editValue]);
+  const getDriftedClaimCodes = useCallback(
+    (content: string) => {
+      if (linkedClaimCodes.length === 0) return [];
+      return linkedClaimCodes.filter((code) => {
+        const approved = APPROVED_CLAIMS.find((c) => c.code === code);
+        if (!approved) return false;
+        return !content.includes(approved.body);
+      });
+    },
+    [linkedClaimCodes],
+  );
+  const pendingPromptClaimCodes = useMemo(
+    () => (claimVariationPrompt ? claimVariationPrompt.claimCodes : []),
+    [claimVariationPrompt],
+  );
+  const promptAnchorCode = claimVariationPrompt?.claimCodes[0] ?? null;
   const renderedContent = useMemo(() => stripApprovedClaimStamps(element.content), [element.content]);
-  const linkedClaimHighlightedContent = useMemo(() => {
+  const activeDisplayContent = useMemo(
+    () => (claimVariationPrompt ? claimVariationPrompt.nextContent : renderedContent),
+    [claimVariationPrompt, renderedContent],
+  );
+  const buildHighlightedClaimContent = useCallback((sourceText: string) => {
     if (linkedClaimCodes.length === 0) return null;
     const linkedClaims = linkedClaimCodes
-      .map((code) => ({ code, body: APPROVED_CLAIMS.find((c) => c.code === code)?.body ?? "" }))
+      .map((code) => ({
+        code,
+        body: (() => {
+          const adjusted = element.linkedClaimAdjustments?.[code]?.editedText?.trim() ?? "";
+          const approved = APPROVED_CLAIMS.find((c) => c.code === code)?.body ?? "";
+          if (adjusted && adjusted !== sourceText.trim()) return adjusted;
+          return extractBestClaimSegment(sourceText, approved);
+        })(),
+      }))
       .filter((claim) => claim.body.length > 0);
     if (linkedClaims.length === 0) return null;
+    const driftedSet = new Set([
+      ...liveEditedDriftedClaimCodes,
+      ...pendingPromptClaimCodes,
+      ...pendingVariationClaimCodes,
+    ]);
 
     const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const ranges: Array<{ start: number; end: number; code: string; focused: boolean }> = [];
+    const ranges: Array<{ start: number; end: number; code: string; focused: boolean; drifted: boolean }> = [];
     for (const claim of linkedClaims) {
       const body = claim.body;
       // Exact matches first.
       let cursor = 0;
-      while (cursor < renderedContent.length) {
-        const idx = renderedContent.indexOf(body, cursor);
+      while (cursor < sourceText.length) {
+        const idx = sourceText.indexOf(body, cursor);
         if (idx === -1) break;
         ranges.push({
           start: idx,
           end: idx + body.length,
           code: claim.code,
           focused: focusedLinkedClaimCode === claim.code,
+          drifted: driftedSet.has(claim.code),
         });
         cursor = idx + body.length;
       }
-      if (ranges.some((r) => r.code === claim.code && renderedContent.slice(r.start, r.end) === body)) continue;
+      if (ranges.some((r) => r.code === claim.code && sourceText.slice(r.start, r.end) === body)) continue;
 
       // Fallback for formatting changes: treat internal whitespace as flexible.
       const flexiblePattern = escapeRegex(body).replace(/\s+/g, "\\s+");
       const re = new RegExp(flexiblePattern, "gi");
       let match: RegExpExecArray | null = null;
-      while ((match = re.exec(renderedContent)) !== null) {
+      while ((match = re.exec(sourceText)) !== null) {
         ranges.push({
           start: match.index,
           end: match.index + match[0].length,
           code: claim.code,
           focused: focusedLinkedClaimCode === claim.code,
+          drifted: driftedSet.has(claim.code),
         });
       }
     }
     if (ranges.length === 0) return null;
     ranges.sort((a, b) => a.start - b.start || a.end - b.end);
-    const merged: Array<{ start: number; end: number; focused: boolean }> = [];
+    const merged: Array<{ start: number; end: number; focused: boolean; drifted: boolean; code: string }> = [];
     for (const r of ranges) {
       const last = merged[merged.length - 1];
-      if (!last || r.start > last.end) merged.push({ start: r.start, end: r.end, focused: r.focused });
+      if (!last || r.start > last.end) merged.push({ start: r.start, end: r.end, focused: r.focused, drifted: r.drifted, code: r.code });
       else {
         if (r.end > last.end) last.end = r.end;
         if (r.focused) last.focused = true;
+        if (r.drifted) last.drifted = true;
+        if (r.focused) last.code = r.code;
       }
     }
 
     const nodes: React.ReactNode[] = [];
     let cursor = 0;
     let key = 0;
-    const text = renderedContent;
+    const text = sourceText;
     for (const r of merged) {
       if (r.start > cursor) nodes.push(text.slice(cursor, r.start));
       nodes.push(
@@ -1459,12 +1539,22 @@ function EditableElement({
           <span
             className={cn(
               "rounded px-1.5 py-0.5",
-              r.focused ? "bg-indigo-300 text-indigo-950 ring-1 ring-indigo-500" : "bg-indigo-100 text-indigo-900",
+              r.drifted
+                ? "bg-amber-100 text-amber-900 ring-1 ring-amber-400"
+                : r.focused
+                  ? "bg-indigo-300 text-indigo-950 ring-1 ring-indigo-500"
+                  : "bg-indigo-100 text-indigo-900",
             )}
           >
             {text.slice(r.start, r.end)}
           </span>
-          <span className="ml-1 inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-indigo-100 px-1 text-indigo-800 align-middle">
+          <span
+            className={cn(
+              "ml-1 inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full px-1 align-middle",
+              r.drifted ? "bg-amber-100 text-amber-800" : "bg-indigo-100 text-indigo-800",
+            )}
+            ref={promptAnchorCode && r.code === promptAnchorCode ? claimPromptAnchorRef : undefined}
+          >
             <LinkedClaimIcon className="h-2.5 w-2.5" />
           </span>
         </span>,
@@ -1474,7 +1564,11 @@ function EditableElement({
     if (cursor < text.length) nodes.push(text.slice(cursor));
 
     return nodes;
-  }, [linkedClaimCodes, renderedContent, focusedLinkedClaimCode]);
+  }, [linkedClaimCodes, focusedLinkedClaimCode, liveEditedDriftedClaimCodes, pendingPromptClaimCodes, pendingVariationClaimCodes, element.linkedClaimAdjustments]);
+  const linkedClaimHighlightedContent = useMemo(
+    () => buildHighlightedClaimContent(activeDisplayContent),
+    [buildHighlightedClaimContent, activeDisplayContent],
+  );
 
   useEffect(() => {
     if (!isImageSelected && element.imageVariations && !element.imageVariations.isRefreshing) {
@@ -1492,12 +1586,14 @@ function EditableElement({
   // Single click on text elements: select only, show action menu without entering edit mode
   const handleSelect = (e: React.MouseEvent) => {
     e.stopPropagation();
+    onTextSelectionChange?.(null);
     selectElement(cardId, element.id);
   };
 
   // Double-click on text elements (or single click on images): enters inline edit / image panel
   const handleStartEdit = (e: React.MouseEvent) => {
     e.stopPropagation();
+    onTextSelectionChange?.(null);
     if (element.type === "divider") return;
     selectElement(cardId, element.id);
 
@@ -1509,40 +1605,102 @@ function EditableElement({
     setEditValue(element.content);
   };
 
+  const handleTextSelectionCapture = useCallback(() => {
+    if (!onTextSelectionChange || isEditing || !isTextElement || !textContentRef.current) return;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      onTextSelectionChange(null);
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    const container = textContentRef.current;
+    if (!container.contains(range.commonAncestorContainer)) {
+      onTextSelectionChange(null);
+      return;
+    }
+    const selectedText = selection.toString().trim();
+    if (!selectedText) {
+      onTextSelectionChange(null);
+      return;
+    }
+    onTextSelectionChange({ elementId: element.id, selectedText });
+  }, [onTextSelectionChange, isEditing, isTextElement, element.id]);
+
   const handleFinishEdit = () => {
     setIsEditing(false);
     const nextContent = editValue.trim();
     if (nextContent !== element.content) {
-      if (linkedClaimCodes.length > 0 && isTextElement) {
+      const driftedClaimCodes = getDriftedClaimCodes(nextContent);
+      if (driftedClaimCodes.length > 0 && isTextElement) {
+        setSubmitAsVariation(true);
         setClaimVariationComment("");
         setClaimVariationError(null);
         setClaimVariationPrompt({
           nextContent,
-          claimCodes: [...linkedClaimCodes],
+          claimCodes: driftedClaimCodes,
         });
         return;
       }
       onChange(nextContent);
     }
   };
+  const handleEditValueChange = useCallback((nextValue: string) => {
+    setEditValue(nextValue);
+    if (!isEditing || !isTextElement || linkedClaimCodes.length === 0) return;
+    const nextContent = nextValue.trim();
+    const driftedClaimCodes = getDriftedClaimCodes(nextContent);
+    if (driftedClaimCodes.length === 0) {
+      setClaimVariationPrompt(null);
+      return;
+    }
+    setSubmitAsVariation(true);
+    setClaimVariationError(null);
+    setClaimVariationPrompt((prev) => {
+      if (
+        prev &&
+        prev.nextContent === nextContent &&
+        prev.claimCodes.length === driftedClaimCodes.length &&
+        prev.claimCodes.every((code, idx) => code === driftedClaimCodes[idx])
+      ) {
+        return prev;
+      }
+      return {
+        nextContent,
+        claimCodes: driftedClaimCodes,
+      };
+    });
+  }, [isEditing, isTextElement, linkedClaimCodes.length, getDriftedClaimCodes]);
 
   const handleKeepClaimVariation = () => {
     if (!claimVariationPrompt) return;
-    const comment = claimVariationComment.trim();
-    if (!comment) {
-      setClaimVariationError("Please add a reason for this wording change.");
-      return;
-    }
     const nextAdjustments = { ...(element.linkedClaimAdjustments ?? {}) };
-    for (const code of claimVariationPrompt.claimCodes) {
-      const base = APPROVED_CLAIMS.find((c) => c.code === code);
-      nextAdjustments[code] = {
-        status: "pending_variation_review",
-        comment,
-        originalText: base?.body ?? "",
-        editedText: claimVariationPrompt.nextContent,
-        updatedAt: Date.now(),
-      };
+    if (submitAsVariation) {
+      const comment = claimVariationComment.trim();
+      if (!comment) {
+        setClaimVariationError("Please add a reason for this wording change.");
+        return;
+      }
+      for (const code of claimVariationPrompt.claimCodes) {
+        const base = APPROVED_CLAIMS.find((c) => c.code === code);
+        nextAdjustments[code] = {
+          status: "pending_variation_review",
+          comment,
+          originalText: base?.body ?? "",
+          editedText: extractBestClaimSegment(claimVariationPrompt.nextContent, base?.body ?? ""),
+          updatedAt: Date.now(),
+        };
+      }
+    } else {
+      for (const code of claimVariationPrompt.claimCodes) {
+        const base = APPROVED_CLAIMS.find((c) => c.code === code);
+        nextAdjustments[code] = {
+          status: "linked_modified",
+          comment: "",
+          originalText: base?.body ?? "",
+          editedText: extractBestClaimSegment(claimVariationPrompt.nextContent, base?.body ?? ""),
+          updatedAt: Date.now(),
+        };
+      }
     }
     updateElement(cardId, element.id, {
       content: claimVariationPrompt.nextContent,
@@ -1550,6 +1708,7 @@ function EditableElement({
       linkedClaimAdjustments: nextAdjustments,
     });
     setClaimVariationPrompt(null);
+    setSubmitAsVariation(true);
     setClaimVariationComment("");
     setClaimVariationError(null);
   };
@@ -1565,6 +1724,7 @@ function EditableElement({
       linkedClaimAdjustments: Object.keys(nextAdjustments).length > 0 ? nextAdjustments : undefined,
     });
     setClaimVariationPrompt(null);
+    setSubmitAsVariation(true);
     setClaimVariationComment("");
     setClaimVariationError(null);
   };
@@ -1572,9 +1732,75 @@ function EditableElement({
   const handleCancelClaimVariation = () => {
     setEditValue(element.content);
     setClaimVariationPrompt(null);
+    setClaimVariationPopoverPos(null);
+    setSubmitAsVariation(true);
     setClaimVariationComment("");
     setClaimVariationError(null);
   };
+
+  const computeClaimVariationPopoverPos = useCallback(() => {
+    if (elementContainerRef.current) {
+      cardShellRef.current = elementContainerRef.current.closest<HTMLElement>("[data-card-shell='true']");
+    }
+    if (!claimVariationPrompt) {
+      setClaimVariationPopoverPos(null);
+      return;
+    }
+    const elementAnchor = elementContainerRef.current;
+    const cardAnchor = cardShellRef.current;
+    const anchor = cardAnchor ?? elementAnchor ?? claimPromptAnchorRef.current;
+    if (!anchor) return;
+    const anchorRect = anchor.getBoundingClientRect();
+    const elementRect = elementAnchor?.getBoundingClientRect();
+    const panelWidth = 320;
+    const overlap = 18;
+    const sideGap = 8;
+    const viewportPadding = 12;
+    const rightCandidateLeft = anchorRect.right - overlap;
+    const canOpenRight = rightCandidateLeft + panelWidth <= window.innerWidth - viewportPadding;
+    const left = canOpenRight
+      ? rightCandidateLeft
+      : Math.max(viewportPadding, anchorRect.left - panelWidth + overlap - sideGap);
+    const preferredTop = elementRect
+      ? elementRect.top + 6
+      : anchorRect.top + 6;
+    const top = Math.max(
+      viewportPadding,
+      Math.min(preferredTop, window.innerHeight - viewportPadding - 260),
+    );
+    const next = {
+      top,
+      left,
+      side: canOpenRight ? "right" as const : "left" as const,
+    };
+    setClaimVariationPopoverPos((prev) => {
+      if (prev && prev.top === next.top && prev.left === next.left && prev.side === next.side) return prev;
+      return next;
+    });
+  }, [claimVariationPrompt]);
+
+  useLayoutEffect(() => {
+    if (!claimVariationPrompt) return;
+    computeClaimVariationPopoverPos();
+  }, [
+    claimVariationPrompt,
+    computeClaimVariationPopoverPos,
+    linkedClaimHighlightedContent,
+    viewport.x,
+    viewport.y,
+    viewport.zoom,
+  ]);
+
+  useEffect(() => {
+    if (!claimVariationPrompt) return;
+    const handleWindowChange = () => computeClaimVariationPopoverPos();
+    window.addEventListener("resize", handleWindowChange);
+    window.addEventListener("scroll", handleWindowChange, true);
+    return () => {
+      window.removeEventListener("resize", handleWindowChange);
+      window.removeEventListener("scroll", handleWindowChange, true);
+    };
+  }, [claimVariationPrompt, computeClaimVariationPopoverPos]);
 
   // Click outside to deselect
   useEffect(() => {
@@ -1624,6 +1850,7 @@ function EditableElement({
 
   return (
     <motion.div
+      ref={elementContainerRef}
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.05, duration: 0.2 }}
@@ -1672,7 +1899,7 @@ function EditableElement({
             <div
               className={cn(
                 "flex h-[22px] min-w-[22px] items-center justify-center gap-0.5 rounded-full px-1 text-[10px] font-bold shadow-md ring-2 ring-white",
-                hasAdjustedLinkedClaims ? "bg-amber-100 text-amber-800" : "bg-indigo-100 text-indigo-800",
+                "bg-indigo-100 text-indigo-800",
               )}
               title={
                 hasAdjustedLinkedClaims
@@ -1752,7 +1979,7 @@ function EditableElement({
             ref={inputRef as React.RefObject<HTMLInputElement>}
             type="text"
             value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
+            onChange={(e) => handleEditValueChange(e.target.value)}
             onBlur={handleFinishEdit}
             onKeyDown={handleKeyDown}
             className={cn(
@@ -1762,7 +1989,9 @@ function EditableElement({
           />
         ) : (
           <h4
+            ref={textContentRef as React.RefObject<HTMLHeadingElement>}
             onClick={handleSelect}
+            onMouseUp={handleTextSelectionCapture}
             onDoubleClick={readOnly ? undefined : handleStartEdit}
             className={cn(
               "font-bold text-[var(--text-primary)] rounded px-2 py-1 -mx-2 -my-1",
@@ -1776,7 +2005,7 @@ function EditableElement({
                 {linkedClaimHighlightedContent}
               </>
             ) : (
-              renderedContent
+              activeDisplayContent
             )}
           </h4>
         )
@@ -1797,7 +2026,7 @@ function EditableElement({
               onChange={(e) => {
                 const v = e.target.value;
                 if (!isEmail && v.length > SMS_MAX_CHARS) return;
-                setEditValue(v);
+                handleEditValueChange(v);
               }}
               onBlur={handleFinishEdit}
               onKeyDown={handleKeyDown}
@@ -1824,7 +2053,9 @@ function EditableElement({
           </div>
         ) : (
           <p
+            ref={textContentRef as React.RefObject<HTMLParagraphElement>}
             onClick={handleSelect}
+            onMouseUp={handleTextSelectionCapture}
             onDoubleClick={readOnly ? undefined : handleStartEdit}
             className={cn(
               "text-[var(--text-muted)] whitespace-pre-line rounded px-2 py-1 -mx-2 -my-1",
@@ -1838,7 +2069,7 @@ function EditableElement({
                 {linkedClaimHighlightedContent}
               </>
             ) : (
-              renderedContent
+              activeDisplayContent
             )}
           </p>
         )
@@ -1855,7 +2086,7 @@ function EditableElement({
               ref={inputRef as React.RefObject<HTMLInputElement>}
               type="text"
               value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
+              onChange={(e) => handleEditValueChange(e.target.value)}
               onBlur={handleFinishEdit}
               onKeyDown={handleKeyDown}
               className="font-bold text-white rounded px-4 py-2 outline-none ring-2 ring-[#0F8EFF] text-[13px] bg-neutral-900"
@@ -1878,14 +2109,16 @@ function EditableElement({
             ref={inputRef as React.RefObject<HTMLInputElement>}
             type="text"
             value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
+            onChange={(e) => handleEditValueChange(e.target.value)}
             onBlur={handleFinishEdit}
             onKeyDown={handleKeyDown}
             className="w-full text-[13px] text-[var(--text-muted)] italic bg-transparent rounded px-2 py-1 -mx-2 -my-1 outline-none ring-2 ring-inset ring-[#0F8EFF]"
           />
         ) : (
           <p
+            ref={textContentRef as React.RefObject<HTMLParagraphElement>}
             onClick={handleSelect}
+            onMouseUp={handleTextSelectionCapture}
             onDoubleClick={readOnly ? undefined : handleStartEdit}
             className={cn(
               "text-[13px] text-[var(--text-muted)] italic rounded px-2 py-1 -mx-2 -my-1",
@@ -1898,7 +2131,7 @@ function EditableElement({
                 {linkedClaimHighlightedContent}
               </>
             ) : (
-              renderedContent
+              activeDisplayContent
             )}
           </p>
         )
@@ -1907,19 +2140,38 @@ function EditableElement({
       {element.type === "divider" && (
         <div className="h-px bg-[var(--border-subtle)]" />
       )}
-      {claimVariationPrompt && (
-        <ClaimVariationPrompt
-          claimCodes={claimVariationPrompt.claimCodes}
-          comment={claimVariationComment}
-          error={claimVariationError}
-          onCommentChange={(value) => {
-            setClaimVariationComment(value);
-            if (claimVariationError) setClaimVariationError(null);
-          }}
-          onKeep={handleKeepClaimVariation}
-          onUnlink={handleUnlinkClaimAndSave}
-          onCancel={handleCancelClaimVariation}
-        />
+      {claimVariationPrompt && claimVariationPopoverPos && typeof document !== "undefined" && createPortal(
+        <div
+          className="fixed z-[10050] w-[320px] max-w-[calc(100vw-1.5rem)]"
+          style={{ top: claimVariationPopoverPos.top, left: claimVariationPopoverPos.left }}
+        >
+          <div
+            className={cn(
+              "absolute top-[120px] h-3 w-3 rotate-45 border-[var(--border)] bg-[var(--surface)]",
+              claimVariationPopoverPos.side === "right"
+                ? "left-[-7px] border-b border-l"
+                : "right-[-7px] border-r border-t",
+            )}
+          />
+          <ClaimVariationPrompt
+            claimCodes={claimVariationPrompt.claimCodes}
+            submitAsVariation={submitAsVariation}
+            comment={claimVariationComment}
+            error={claimVariationError}
+            onToggleSubmitAsVariation={(next) => {
+              setSubmitAsVariation(next);
+              if (!next) setClaimVariationError(null);
+            }}
+            onCommentChange={(value) => {
+              setClaimVariationComment(value);
+              if (claimVariationError) setClaimVariationError(null);
+            }}
+            onKeep={handleKeepClaimVariation}
+            onUnlink={handleUnlinkClaimAndSave}
+            onCancel={handleCancelClaimVariation}
+          />
+        </div>,
+        document.body,
       )}
     </motion.div>
   );
@@ -1927,40 +2179,54 @@ function EditableElement({
 
 function ClaimVariationPrompt({
   claimCodes,
+  submitAsVariation,
   comment,
   error,
+  onToggleSubmitAsVariation,
   onCommentChange,
   onKeep,
   onUnlink,
   onCancel,
 }: {
   claimCodes: string[];
+  submitAsVariation: boolean;
   comment: string;
   error: string | null;
+  onToggleSubmitAsVariation: (next: boolean) => void;
   onCommentChange: (value: string) => void;
   onKeep: () => void;
   onUnlink: () => void;
   onCancel: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/35 p-4">
-      <div className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-2xl">
+      <div className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-2xl">
         <p className="text-[14px] font-semibold text-[var(--text-primary)]">Linked claim wording changed</p>
         <p className="mt-1 text-[12px] leading-snug text-[var(--text-muted)]">
-          Keep this content linked as a claim variation, or unlink and treat it as regular copy.
+          This linked claim text changed. Keep it linked or unlink and treat it as regular copy.
         </p>
         <p className="mt-2 text-[11px] font-semibold text-[var(--text-secondary)]">
           Affected claim{claimCodes.length === 1 ? "" : "s"}: {claimCodes.join(", ")}
         </p>
-        <label className="mt-3 block text-[11px] font-semibold text-[var(--text-secondary)]">
-          Why was wording changed?
-          <textarea
-            value={comment}
-            onChange={(e) => onCommentChange(e.target.value)}
-            placeholder="Explain why this variation is needed for reviewers..."
-            className="mt-1 h-20 w-full resize-none rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-[12px] text-[var(--text-primary)] outline-none focus:border-neutral-400"
+        <label className="mt-3 inline-flex items-center gap-2 text-[11px] font-semibold text-[var(--text-secondary)]">
+          <input
+            type="checkbox"
+            checked={submitAsVariation}
+            onChange={(e) => onToggleSubmitAsVariation(e.target.checked)}
+            className="h-3.5 w-3.5 rounded border-[var(--border)] text-indigo-600 focus:ring-indigo-500"
           />
+          Submit as new claim variation for review
         </label>
+        {submitAsVariation && (
+          <label className="mt-2 block text-[11px] font-semibold text-[var(--text-secondary)]">
+            Why was wording changed?
+            <textarea
+              value={comment}
+              onChange={(e) => onCommentChange(e.target.value)}
+              placeholder="Explain why this variation is needed for reviewers..."
+              className="mt-1 h-20 w-full resize-none rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-[12px] text-[var(--text-primary)] outline-none focus:border-neutral-400"
+            />
+          </label>
+        )}
         {error && <p className="mt-1 text-[11px] font-medium text-red-500">{error}</p>}
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
@@ -1968,7 +2234,7 @@ function ClaimVariationPrompt({
             onClick={onKeep}
             className="rounded-md bg-indigo-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-700"
           >
-            Keep link + submit variation
+            {submitAsVariation ? "Keep linked + submit variation" : "Keep linked"}
           </button>
           <button
             type="button"
@@ -1986,8 +2252,49 @@ function ClaimVariationPrompt({
           </button>
         </div>
       </div>
-    </div>
   );
+}
+
+function extractBestClaimSegment(content: string, originalClaimText: string): string {
+  const trimmedContent = content.trim();
+  if (!trimmedContent) return "";
+  const original = originalClaimText.trim();
+  if (!original) return "";
+  if (trimmedContent.includes(original)) return original;
+
+  const paragraphs = trimmedContent
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (paragraphs.length === 0) return original;
+
+  const tokenize = (value: string) =>
+    new Set(
+      value
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .split(/\s+/)
+        .filter((t) => t.length > 2),
+    );
+
+  const baseTokens = tokenize(original);
+  if (baseTokens.size === 0) return paragraphs[0];
+
+  let best = paragraphs[0];
+  let bestScore = -1;
+  for (const para of paragraphs) {
+    const paraTokens = tokenize(para);
+    let overlap = 0;
+    for (const token of paraTokens) {
+      if (baseTokens.has(token)) overlap += 1;
+    }
+    const score = overlap / Math.max(baseTokens.size, 1);
+    if (score > bestScore) {
+      best = para;
+      bestScore = score;
+    }
+  }
+  return best;
 }
 
 // Image Variation Toolbar (Photoshop-style generative options)
@@ -2212,3 +2519,4 @@ function SparklesBadgeIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+

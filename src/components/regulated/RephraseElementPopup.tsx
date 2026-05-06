@@ -7,6 +7,7 @@ import { useSimpleCanvasStore } from "@/stores/simple-canvas";
 import { useCanvasStore } from "@/stores/canvas";
 import { ContentElement } from "@/types/simple-canvas";
 import { getPresetsForContext, applyRephrasePreset } from "@/data/rephrase-presets";
+import { APPROVED_CLAIMS } from "@/stores/regulated-content";
 import { InlineDiff } from "@/components/canvas/InlineDiff";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/cn";
@@ -17,6 +18,7 @@ interface RephraseElementPopupProps {
   cardId: string;
   element: ContentElement;
   channel: "email" | "sms";
+  selectedText?: string;
   onClose: () => void;
 }
 
@@ -24,18 +26,17 @@ export function RephraseElementPopup({
   cardId,
   element,
   channel,
+  selectedText,
   onClose,
 }: RephraseElementPopupProps) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
-
-  if (!mounted) return null;
+  if (typeof document === "undefined") return null;
 
   return createPortal(
     <RephrasePopupContent
       cardId={cardId}
       element={element}
       channel={channel}
+      selectedText={selectedText}
       onClose={onClose}
     />,
     document.body,
@@ -45,6 +46,7 @@ export function RephraseElementPopup({
 function RephrasePopupContent({
   cardId,
   element,
+  selectedText,
   onClose,
 }: RephraseElementPopupProps) {
   const [phase, setPhase] = useState<Phase>("prompt");
@@ -57,6 +59,7 @@ function RephrasePopupContent({
   const regulated = projectId === "proj-pharma-email";
   const presets = getPresetsForContext(regulated);
   const updateElement = useSimpleCanvasStore((s) => s.updateElement);
+  const hasSelectionTarget = Boolean(selectedText && selectedText.trim().length > 0);
 
   // Close on Escape
   useEffect(() => {
@@ -89,8 +92,9 @@ function RephrasePopupContent({
     // Simulate AI regeneration delay
     await new Promise((r) => setTimeout(r, 1200));
 
+    const sourceContent = hasSelectionTarget ? selectedText!.trim() : element.content;
     const { newContent } = applyRephrasePreset(
-      element.content,
+      sourceContent,
       selectedPresets,
       customPrompt,
     );
@@ -100,7 +104,42 @@ function RephrasePopupContent({
   };
 
   const handleAccept = () => {
-    updateElement(cardId, element.id, { content: regeneratedContent });
+    const preserveClaimText = selectedPresets.includes("preserve-claim");
+    const fallbackContent = hasSelectionTarget
+      ? replaceFirstMatch(element.content, selectedText!.trim(), regeneratedContent)
+      : regeneratedContent;
+    const finalContent = fallbackContent;
+    const linkedClaimCodes = element.linkedClaimCodes ?? [];
+    const driftedClaimCodes =
+      preserveClaimText || linkedClaimCodes.length === 0
+        ? []
+        : linkedClaimCodes.filter((code) => {
+            const approved = APPROVED_CLAIMS.find((c) => c.code === code);
+            if (!approved) return false;
+            return !finalContent.includes(approved.body);
+          });
+
+    if (driftedClaimCodes.length > 0) {
+      const nextAdjustments = { ...(element.linkedClaimAdjustments ?? {}) };
+      for (const code of driftedClaimCodes) {
+        const base = APPROVED_CLAIMS.find((c) => c.code === code);
+        nextAdjustments[code] = {
+          status: "pending_variation_review",
+          comment: "Generated via Rephrase without preserve claim text.",
+          originalText: base?.body ?? "",
+          editedText: extractBestClaimSegment(finalContent, base?.body ?? ""),
+          updatedAt: Date.now(),
+        };
+      }
+      updateElement(cardId, element.id, {
+        content: finalContent,
+        linkedClaimCodes: Array.from(new Set([...(element.linkedClaimCodes ?? []), ...driftedClaimCodes])),
+        linkedClaimAdjustments: nextAdjustments,
+      });
+      onClose();
+      return;
+    }
+    updateElement(cardId, element.id, { content: finalContent });
     onClose();
   };
 
@@ -116,7 +155,8 @@ function RephrasePopupContent({
     }
   };
 
-  const noChange = regeneratedContent === element.content;
+  const diffOriginal = hasSelectionTarget ? selectedText!.trim() : element.content;
+  const noChange = regeneratedContent === diffOriginal;
 
   return (
     <>
@@ -157,7 +197,7 @@ function RephrasePopupContent({
                     <RephraseIcon className="w-3.5 h-3.5 text-indigo-600" />
                   </div>
                   <span className="text-[14px] font-semibold text-[var(--text-primary)]">
-                    Rephrase block
+                    {hasSelectionTarget ? "Rephrase selection" : "Rephrase block"}
                   </span>
                 </div>
                 <button
@@ -170,6 +210,11 @@ function RephrasePopupContent({
               </div>
 
               {/* Preset chips */}
+              {hasSelectionTarget && (
+                <p className="text-[12px] text-[var(--text-muted)] mb-2">
+                  Applying changes to selected text only.
+                </p>
+              )}
               <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)] mb-2">
                 Style options
               </p>
@@ -302,7 +347,7 @@ function RephrasePopupContent({
               ) : (
                 <div className="rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-3 mb-4 max-h-48 overflow-y-auto">
                   <InlineDiff
-                    original={element.content}
+                    original={diffOriginal}
                     updated={regeneratedContent}
                   />
                 </div>
@@ -405,4 +450,52 @@ function CheckIcon({ className }: { className?: string }) {
       <polyline points="20 6 9 17 4 12" />
     </svg>
   );
+}
+
+function replaceFirstMatch(source: string, selectedText: string, replacement: string): string {
+  const idx = source.indexOf(selectedText);
+  if (idx === -1) return source;
+  return source.slice(0, idx) + replacement + source.slice(idx + selectedText.length);
+}
+
+function extractBestClaimSegment(content: string, originalClaimText: string): string {
+  const trimmedContent = content.trim();
+  if (!trimmedContent) return "";
+  const original = originalClaimText.trim();
+  if (!original) return "";
+  if (trimmedContent.includes(original)) return original;
+
+  const paragraphs = trimmedContent
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (paragraphs.length === 0) return original;
+
+  const tokenize = (value: string) =>
+    new Set(
+      value
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .split(/\s+/)
+        .filter((t) => t.length > 2),
+    );
+
+  const baseTokens = tokenize(original);
+  if (baseTokens.size === 0) return paragraphs[0];
+
+  let best = paragraphs[0];
+  let bestScore = -1;
+  for (const para of paragraphs) {
+    const paraTokens = tokenize(para);
+    let overlap = 0;
+    for (const token of paraTokens) {
+      if (baseTokens.has(token)) overlap += 1;
+    }
+    const score = overlap / Math.max(baseTokens.size, 1);
+    if (score > bestScore) {
+      best = para;
+      bestScore = score;
+    }
+  }
+  return best;
 }
