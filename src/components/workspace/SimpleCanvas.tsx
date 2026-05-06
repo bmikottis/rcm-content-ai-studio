@@ -14,10 +14,10 @@ import { ContentTypeIcon } from "@/components/ui/ContentTypeIcon";
 import { cn } from "@/lib/cn";
 import { useThemeStore } from "@/stores/theme";
 import { useCanvasStore } from "@/stores/canvas";
-import { useRegulatedContentStore, filterClaimsForContext, elementKey } from "@/stores/regulated-content";
+import { useRegulatedContentStore, filterClaimsForContext, elementKey, APPROVED_CLAIMS } from "@/stores/regulated-content";
 import { regulatedEmailChromeAnchors } from "@/lib/regulated-email-anchors";
 import { scanCardsForCompliance } from "@/lib/compliance-scan";
-import { extractLinkedClaimCodes, stripApprovedClaimStamps } from "@/lib/linked-claims";
+import { extractVisibleLinkedClaimCodes, stripApprovedClaimStamps } from "@/lib/linked-claims";
 import { ComplianceFlagIcon } from "@/components/regulated/ComplianceFlagIcon";
 import { ElementSidePanel, RephraseIcon } from "@/components/regulated/ElementSidePanel";
 import { RephraseElementPopup } from "@/components/regulated/RephraseElementPopup";
@@ -1347,7 +1347,10 @@ function EditableElement({
 
   const ek = elementKey(cardId, element.id);
   const dismissed = dismissedByElement[ek] ?? [];
-  const linkedClaimCodes = useMemo(() => extractLinkedClaimCodes(element.content), [element.content]);
+  const linkedClaimCodes = useMemo(
+    () => extractVisibleLinkedClaimCodes(element, APPROVED_CLAIMS),
+    [element],
+  );
   const hasLinkedClaims = linkedClaimCodes.length > 0;
   const suggestionCount = useMemo(() => {
     if (!regulated || !regulatedClaimsAnchor || element.type === "divider") return 0;
@@ -1377,21 +1380,90 @@ function EditableElement({
   const showComplianceFlagBadge =
     regulated && regulatedFlagAnchor && element.type !== "divider" && (isCreatorFlagged || hasFlagScanIssue);
 
-  const { selectedElement, selectElement, clearImageVariations } = useSimpleCanvasStore();
+  const { selectedElement, selectElement, clearImageVariations, focusedLinkedClaimCode } = useSimpleCanvasStore();
   const compliancePulseKey = useSimpleCanvasStore((s) => s.compliancePulseKey);
   const isImageSelected = selectedElement?.cardId === cardId && selectedElement?.elementId === element.id;
   const isElementSelected = selectedElement?.cardId === cardId && selectedElement?.elementId === element.id;
   const isTextElement = element.type === "headline" || element.type === "body" || element.type === "cta";
   const renderedContent = useMemo(() => stripApprovedClaimStamps(element.content), [element.content]);
-  const linkedClaimParts = useMemo(() => {
-    const match = element.content.match(/\[Approved claim [^\]]+\]\s*\n?([\s\S]*)$/);
-    if (!match) return null;
-    const stampIdx = element.content.indexOf(match[0]);
-    const before = stampIdx > 0 ? element.content.slice(0, stampIdx).trimEnd() : "";
-    const claimText = (match[1] ?? "").trim();
-    if (!claimText) return null;
-    return { before, claimText };
-  }, [element.content]);
+  const linkedClaimHighlightedContent = useMemo(() => {
+    if (linkedClaimCodes.length === 0) return null;
+    const linkedClaims = linkedClaimCodes
+      .map((code) => ({ code, body: APPROVED_CLAIMS.find((c) => c.code === code)?.body ?? "" }))
+      .filter((claim) => claim.body.length > 0);
+    if (linkedClaims.length === 0) return null;
+
+    const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const ranges: Array<{ start: number; end: number; code: string; focused: boolean }> = [];
+    for (const claim of linkedClaims) {
+      const body = claim.body;
+      // Exact matches first.
+      let cursor = 0;
+      while (cursor < renderedContent.length) {
+        const idx = renderedContent.indexOf(body, cursor);
+        if (idx === -1) break;
+        ranges.push({
+          start: idx,
+          end: idx + body.length,
+          code: claim.code,
+          focused: focusedLinkedClaimCode === claim.code,
+        });
+        cursor = idx + body.length;
+      }
+      if (ranges.some((r) => r.code === claim.code && renderedContent.slice(r.start, r.end) === body)) continue;
+
+      // Fallback for formatting changes: treat internal whitespace as flexible.
+      const flexiblePattern = escapeRegex(body).replace(/\s+/g, "\\s+");
+      const re = new RegExp(flexiblePattern, "gi");
+      let match: RegExpExecArray | null = null;
+      while ((match = re.exec(renderedContent)) !== null) {
+        ranges.push({
+          start: match.index,
+          end: match.index + match[0].length,
+          code: claim.code,
+          focused: focusedLinkedClaimCode === claim.code,
+        });
+      }
+    }
+    if (ranges.length === 0) return null;
+    ranges.sort((a, b) => a.start - b.start || a.end - b.end);
+    const merged: Array<{ start: number; end: number; focused: boolean }> = [];
+    for (const r of ranges) {
+      const last = merged[merged.length - 1];
+      if (!last || r.start > last.end) merged.push({ start: r.start, end: r.end, focused: r.focused });
+      else {
+        if (r.end > last.end) last.end = r.end;
+        if (r.focused) last.focused = true;
+      }
+    }
+
+    const nodes: React.ReactNode[] = [];
+    let cursor = 0;
+    let key = 0;
+    const text = renderedContent;
+    for (const r of merged) {
+      if (r.start > cursor) nodes.push(text.slice(cursor, r.start));
+      nodes.push(
+        <span key={`linked-claim-${key++}`} className="inline-flex items-center">
+          <span
+            className={cn(
+              "rounded px-1.5 py-0.5",
+              r.focused ? "bg-indigo-300 text-indigo-950 ring-1 ring-indigo-500" : "bg-indigo-100 text-indigo-900",
+            )}
+          >
+            {text.slice(r.start, r.end)}
+          </span>
+          <span className="ml-1 inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-indigo-100 px-1 text-indigo-800 align-middle">
+            <LinkedClaimIcon className="h-2.5 w-2.5" />
+          </span>
+        </span>,
+      );
+      cursor = r.end;
+    }
+    if (cursor < text.length) nodes.push(text.slice(cursor));
+
+    return nodes;
+  }, [linkedClaimCodes, renderedContent, focusedLinkedClaimCode]);
 
   useEffect(() => {
     if (!isImageSelected && element.imageVariations && !element.imageVariations.isRefreshing) {
@@ -1621,18 +1693,9 @@ function EditableElement({
             )}
             title={readOnly ? undefined : "Double-click to edit"}
           >
-            {isElementSelected && linkedClaimParts ? (
+            {isElementSelected && linkedClaimHighlightedContent ? (
               <>
-                {linkedClaimParts.before ? `${linkedClaimParts.before} ` : ""}
-                <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-indigo-900">
-                  {linkedClaimParts.claimText}
-                </span>
-                <span
-                  className="ml-1 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-indigo-100 px-1 text-indigo-800 align-middle"
-                  title={`Linked claim${linkedClaimCodes.length === 1 ? "" : "s"}`}
-                >
-                  <LinkedClaimIcon className="h-3 w-3" />
-                </span>
+                {linkedClaimHighlightedContent}
               </>
             ) : (
               renderedContent
@@ -1692,18 +1755,9 @@ function EditableElement({
             )}
             title={readOnly ? undefined : "Double-click to edit"}
           >
-            {isElementSelected && linkedClaimParts ? (
+            {isElementSelected && linkedClaimHighlightedContent ? (
               <>
-                {linkedClaimParts.before ? `${linkedClaimParts.before}\n\n` : ""}
-                <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-indigo-900">
-                  {linkedClaimParts.claimText}
-                </span>
-                <span
-                  className="ml-1 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-indigo-100 px-1 text-indigo-800 align-middle"
-                  title={`Linked claim${linkedClaimCodes.length === 1 ? "" : "s"}`}
-                >
-                  <LinkedClaimIcon className="h-3 w-3" />
-                </span>
+                {linkedClaimHighlightedContent}
               </>
             ) : (
               renderedContent
@@ -1761,18 +1815,9 @@ function EditableElement({
             )}
             title={readOnly ? undefined : "Double-click to edit"}
           >
-            {isElementSelected && linkedClaimParts ? (
+            {isElementSelected && linkedClaimHighlightedContent ? (
               <>
-                {linkedClaimParts.before ? `${linkedClaimParts.before} ` : ""}
-                <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-indigo-900">
-                  {linkedClaimParts.claimText}
-                </span>
-                <span
-                  className="ml-1 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-indigo-100 px-1 text-indigo-800 align-middle"
-                  title={`Linked claim${linkedClaimCodes.length === 1 ? "" : "s"}`}
-                >
-                  <LinkedClaimIcon className="h-3 w-3" />
-                </span>
+                {linkedClaimHighlightedContent}
               </>
             ) : (
               renderedContent

@@ -16,7 +16,7 @@ import { scanCardsForCompliance, type ComplianceIssue } from "@/lib/compliance-s
 import { regulatedEmailChromeAnchors } from "@/lib/regulated-email-anchors";
 import { useRegulatedContentStore, elementKey, APPROVED_CLAIMS, filterClaimsForContext } from "@/stores/regulated-content";
 import { ComplianceFlagIcon } from "@/components/regulated/ComplianceFlagIcon";
-import { extractLinkedClaimCodes } from "@/lib/linked-claims";
+import { extractVisibleLinkedClaimCodes } from "@/lib/linked-claims";
 import { cn } from "@/lib/cn";
 import type { ChannelCard, CardVariant, ContentElement, CardStatus } from "@/types/simple-canvas";
 
@@ -61,7 +61,7 @@ const DEFAULT_WIDTH = 300;
 export function ChannelInspector() {
   const projectId = useCanvasStore((s) => s.projectId);
   const regulatedCanvas = projectId === "proj-pharma-email";
-  const { selectedCardId, selectedCardIds, selectedElement, selectedVariantId, cards, removeCard, clearSelection, updateCard, addCard, selectElement, addElement, removeElement, updateVariantElement, addVariantElement, removeVariantElement, reorderVariantElements, removeVariant, addVariant, selectVariant, createGroup, cardGroups, selectedGroupId, renameGroup, removeGroup, duplicateGroup, addGroupTag, removeGroupTag, removeFromGroup, focusCard, pulseComplianceOnElement } =
+  const { selectedCardId, selectedCardIds, selectedElement, selectedVariantId, cards, removeCard, clearSelection, updateCard, addCard, selectElement, addElement, removeElement, updateVariantElement, addVariantElement, removeVariantElement, reorderVariantElements, removeVariant, addVariant, selectVariant, createGroup, cardGroups, selectedGroupId, renameGroup, removeGroup, duplicateGroup, addGroupTag, removeGroupTag, removeFromGroup, focusCard, pulseComplianceOnElement, focusLinkedClaimCode } =
     useSimpleCanvasStore();
 
   const selectedCards = useMemo(
@@ -88,7 +88,7 @@ export function ChannelInspector() {
   const linkedClaims = useMemo(() => {
     if (!card) return [];
     return card.elements.flatMap((el) => {
-      const codes = extractLinkedClaimCodes(el.content);
+      const codes = extractVisibleLinkedClaimCodes(el, APPROVED_CLAIMS);
       return codes.map((code, idx) => {
         const claim = APPROVED_CLAIMS.find((c) => c.code === code);
         return {
@@ -104,12 +104,13 @@ export function ChannelInspector() {
     });
   }, [card]);
 
-  const handleLinkedClaimClick = useCallback((elementId: string) => {
+  const handleLinkedClaimClick = useCallback((elementId: string, claimCode: string) => {
     if (!card) return;
     focusCard(card.id);
     selectElement(card.id, elementId);
     pulseComplianceOnElement(card.id, elementId);
-  }, [focusCard, selectElement, pulseComplianceOnElement, card]);
+    focusLinkedClaimCode(claimCode);
+  }, [focusCard, selectElement, pulseComplianceOnElement, focusLinkedClaimCode, card]);
 
   const profile = useRegulatedContentStore((s) => s.profile);
   const creatorFlags = useRegulatedContentStore((s) => s.creatorComplianceFlags);
@@ -194,7 +195,7 @@ export function ChannelInspector() {
       }
       const key = elementKey(card.id, el.id);
       const dismissed = useRegulatedContentStore.getState().dismissedByElement[key] ?? [];
-      const linked = extractLinkedClaimCodes(el.content);
+      const linked = extractVisibleLinkedClaimCodes(el, APPROVED_CLAIMS);
       const count = filterClaimsForContext({
         profile,
         channel: card.channel as "email" | "sms",
@@ -1026,32 +1027,36 @@ export function ChannelInspector() {
             ) : (
               <div className="min-w-0 flex-1">
                 <span className="block truncate text-[13px] font-semibold text-[var(--text-primary)]">{card.title}</span>
-                {regulatedCanvas && (
+                {regulatedCanvas && (frameComplianceCount > 0 || frameRecommendationCount > 0) && (
                   <div className="mt-1 mb-0.5 flex items-center gap-1.5">
-                    <span className="group relative inline-flex">
-                      <span
-                        className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700"
-                        aria-label={`${frameComplianceCount} compliance flags on this frame`}
-                      >
-                        <ComplianceFlagIcon className="h-3 w-3" />
-                        {frameComplianceCount}
+                    {frameComplianceCount > 0 && (
+                      <span className="group relative inline-flex">
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700"
+                          aria-label={`${frameComplianceCount} compliance flags on this frame`}
+                        >
+                          <ComplianceFlagIcon className="h-3 w-3" />
+                          {frameComplianceCount}
+                        </span>
+                        <span className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden whitespace-nowrap rounded-md bg-[var(--text-primary)] px-2 py-1 text-[10px] font-medium text-white shadow-lg group-hover:block">
+                          Compliance flags on this frame
+                        </span>
                       </span>
-                      <span className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden whitespace-nowrap rounded-md bg-[var(--text-primary)] px-2 py-1 text-[10px] font-medium text-white shadow-lg group-hover:block">
-                        Compliance flags on this frame
+                    )}
+                    {frameRecommendationCount > 0 && (
+                      <span className="group relative inline-flex">
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700"
+                          aria-label={`${frameRecommendationCount} AI suggestions available on this frame`}
+                        >
+                          <SparklesMiniIcon className="h-3 w-3" />
+                          {frameRecommendationCount}
+                        </span>
+                        <span className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden whitespace-nowrap rounded-md bg-[var(--text-primary)] px-2 py-1 text-[10px] font-medium text-white shadow-lg group-hover:block">
+                          AI suggestions available on this frame
+                        </span>
                       </span>
-                    </span>
-                    <span className="group relative inline-flex">
-                      <span
-                        className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700"
-                        aria-label={`${frameRecommendationCount} AI suggestions available on this frame`}
-                      >
-                        <SparklesMiniIcon className="h-3 w-3" />
-                        {frameRecommendationCount}
-                      </span>
-                      <span className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden whitespace-nowrap rounded-md bg-[var(--text-primary)] px-2 py-1 text-[10px] font-medium text-white shadow-lg group-hover:block">
-                        AI suggestions available on this frame
-                      </span>
-                    </span>
+                    )}
                   </div>
                 )}
               </div>
@@ -1949,7 +1954,7 @@ function LinkedClaimsSection({
     body: string | null;
     references: { id: string; label: string; anchorCount: number; href?: string }[];
   }[];
-  onClaimClick: (elementId: string) => void;
+  onClaimClick: (elementId: string, claimCode: string) => void;
 }) {
   return (
     <div className="px-4 py-3">
@@ -1958,17 +1963,27 @@ function LinkedClaimsSection({
       ) : (
         <ul className="space-y-1.5">
           {claims.map((claim) => (
-            <li key={claim.id} className="rounded-md border border-indigo-100 bg-indigo-50/50 px-2.5 py-2">
+            <li
+              key={claim.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => onClaimClick(claim.elementId, claim.code)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onClaimClick(claim.elementId, claim.code);
+                }
+              }}
+              className="cursor-pointer rounded-md border border-indigo-100 bg-white px-2.5 py-2 transition-colors hover:bg-indigo-50/60 focus:outline-none focus:ring-2 focus:ring-indigo-400/70"
+            >
               <div className="flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={() => onClaimClick(claim.elementId)}
-                  className="inline-flex items-center gap-1 text-[11px] font-mono font-semibold text-indigo-800 underline underline-offset-2 hover:text-indigo-900"
+                <span
+                  className="inline-flex items-center gap-1 text-[11px] font-mono font-semibold text-indigo-800 underline underline-offset-2"
                   title={`Focus linked claim in ${claim.blockLabel}`}
                 >
                   <LinkedClaimShieldIcon className="h-3 w-3" />
                   {claim.code}
-                </button>
+                </span>
                 <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
                   Approved Claim
                 </span>
@@ -1980,19 +1995,25 @@ function LinkedClaimsSection({
                 <summary className="cursor-pointer list-none text-[11px] font-semibold text-indigo-700 underline decoration-dotted underline-offset-2 hover:text-indigo-800">
                   References
                 </summary>
-                <div className="mt-1 rounded-md border border-indigo-100 bg-indigo-50/40 px-2 py-1.5">
+                <div className="mt-1 rounded-md border border-indigo-200 bg-[var(--surface-subtle)] px-2 py-1.5">
                   <ul className="space-y-0.5">
                     {claim.references.map((reference) => (
                       <li key={reference.id}>
                         <a
                           href={reference.href ?? "#"}
                           onClick={(e) => {
+                            e.stopPropagation();
                             if (!reference.href) e.preventDefault();
                           }}
-                          className="text-[11px] font-medium text-indigo-800 hover:text-indigo-900"
+                          className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-800 hover:text-indigo-900"
                         >
+                          <ReferenceDocumentIcon className="h-3 w-3 shrink-0 text-[var(--text-muted)]" />
                           <span className="underline underline-offset-2">{reference.label}</span>
-                          <span> ({reference.anchorCount})</span>
+                          <span className="inline-flex items-center gap-0.5">
+                            ({reference.anchorCount}
+                            <ReferenceAnchorIcon className="h-[0.95em] w-[0.95em] align-[-0.1em]" />
+                            )
+                          </span>
                         </a>
                       </li>
                     ))}
@@ -2014,6 +2035,32 @@ function LinkedClaimShieldIcon({ className }: { className?: string }) {
         fillRule="evenodd"
         clipRule="evenodd"
         d="M2.95373 8.61543H29.046C29.6614 8.61543 30.1537 8.00004 29.9691 7.38465C29.3537 5.35388 28.4922 3.50771 27.323 1.84617C26.9537 1.35386 26.2768 1.29232 25.9076 1.72309C24.7384 2.83079 23.0768 3.44618 21.3537 3.44618C19.5076 3.44618 17.846 2.70771 16.6153 1.47694C16.246 1.1077 15.6307 1.1077 15.2614 1.47694C14.0307 2.70771 12.3691 3.44618 10.523 3.44618C8.79989 3.44618 7.19989 2.83079 5.96912 1.72309C5.53835 1.35386 4.86143 1.4154 4.55373 1.84617C3.3845 3.44617 2.46143 5.35388 1.90758 7.38465C1.84604 8.00004 2.33835 8.61543 2.95373 8.61543V8.61543ZM30.7692 12.5539C30.7692 12 30.3384 11.6923 29.7846 11.6923H2.21533C1.66148 11.6923 1.23071 12 1.23071 12.5539V12.7385C1.23071 21.9693 7.63071 29.6001 15.9999 30.7693C24.3692 29.6001 30.7692 21.9693 30.7692 12.8V12.5539V12.5539Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function ReferenceDocumentIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 32 32" fill="none" aria-hidden>
+      <path
+        d="M28.1096 7.92446L21.6114 1.42553C21.5493 1.35808 21.4728 1.30539 21.3876 1.27131C21.3024 1.23724 21.2107 1.22264 21.1192 1.22859C21.028 1.22604 20.9372 1.24213 20.8524 1.27587C20.7677 1.30961 20.6907 1.36029 20.6262 1.42481C20.5616 1.48933 20.511 1.56633 20.4772 1.65111C20.4435 1.73589 20.4274 1.82666 20.43 1.91787V7.13671C20.4316 7.65852 20.6396 8.1585 21.0085 8.52748C21.3774 8.89645 21.8773 9.10446 22.3991 9.10609H27.6173C27.7085 9.10863 27.7992 9.09254 27.884 9.05881C27.9688 9.02507 28.0458 8.97439 28.1103 8.90987C28.1748 8.84535 28.2255 8.76834 28.2592 8.68356C28.2929 8.59879 28.309 8.50801 28.3065 8.4168C28.3124 8.32525 28.2978 8.23352 28.2638 8.14833C28.2297 8.06315 28.177 7.98666 28.1096 7.92446Z"
+        fill="currentColor"
+      />
+      <path
+        d="M27.3219 12.0601H20.43C19.6471 12.0585 18.8968 11.7468 18.3432 11.1931C17.7896 10.6395 17.4779 9.88905 17.4763 9.10609V2.21328C17.4763 1.95212 17.3725 1.70166 17.1879 1.517C17.0033 1.33233 16.7528 1.22859 16.4917 1.22859H6.64607C5.86321 1.23022 5.11287 1.54197 4.55929 2.09561C4.00572 2.64925 3.69401 3.39969 3.69238 4.18265V27.8151C3.69401 28.5981 4.00572 29.3485 4.55929 29.9022C5.11287 30.4558 5.86321 30.7676 6.64607 30.7692H25.3528C26.1356 30.7676 26.886 30.4558 27.4396 29.9022C27.9931 29.3485 28.3048 28.5981 28.3065 27.8151V13.0448C28.3065 12.9155 28.281 12.7875 28.2315 12.668C28.182 12.5485 28.1095 12.44 28.0181 12.3486C27.9267 12.2571 27.8181 12.1846 27.6987 12.1351C27.5792 12.0856 27.4512 12.0601 27.3219 12.0601ZM7.13836 7.43212L9.55054 7.08748C9.59976 7.08748 9.69822 7.03824 9.69822 6.98901L10.7812 4.77346C10.8013 4.73897 10.83 4.71034 10.8645 4.69044C10.8991 4.67054 10.9383 4.66007 10.9782 4.66007C11.018 4.66007 11.0572 4.67054 11.0918 4.69044C11.1263 4.71034 11.155 4.73897 11.1751 4.77346L12.2581 6.98901C12.3073 7.03824 12.3565 7.08748 12.4058 7.08748L14.818 7.43212C14.9656 7.48135 15.0641 7.67829 14.9164 7.77676L13.1442 9.49996C13.095 9.54919 13.095 9.59843 13.095 9.6969L13.4888 12.1094C13.4969 12.1468 13.4935 12.1858 13.4791 12.2213C13.4648 12.2568 13.44 12.2872 13.4082 12.3084C13.3763 12.3297 13.3388 12.3408 13.3005 12.3405C13.2622 12.3401 13.2249 12.3282 13.1934 12.3063L11.0274 11.1739C11.0003 11.1497 10.9653 11.1363 10.9289 11.1363C10.8926 11.1363 10.8575 11.1497 10.8305 11.1739L8.66443 12.3063C8.63298 12.3282 8.59569 12.3401 8.55739 12.3405C8.51909 12.3408 8.48157 12.3297 8.4497 12.3084C8.41783 12.2872 8.3931 12.2568 8.37871 12.2213C8.36433 12.1858 8.36097 12.1468 8.36906 12.1094L8.76288 9.6969C8.77025 9.6275 8.75281 9.55773 8.71366 9.49996L6.94144 7.77676C6.89221 7.67829 6.99067 7.48135 7.13836 7.43212ZM22.3991 23.8764C22.3991 24.1375 22.2954 24.388 22.1107 24.5727C21.9261 24.7573 21.6756 24.8611 21.4145 24.8611H8.6152C8.35408 24.8611 8.10365 24.7573 7.91901 24.5727C7.73437 24.388 7.63064 24.1375 7.63064 23.8764V22.8917C7.63064 22.6305 7.73437 22.3801 7.91901 22.1954C8.10365 22.0108 8.35408 21.907 8.6152 21.907H21.4145C21.6756 21.907 21.9261 22.0108 22.1107 22.1954C22.2954 22.3801 22.3991 22.6305 22.3991 22.8917V23.8764ZM24.3682 17.9683C24.3682 18.0976 24.3428 18.2256 24.2933 18.3451C24.2438 18.4646 24.1713 18.5731 24.0798 18.6645C23.9884 18.756 23.8799 18.8285 23.7604 18.878C23.641 18.9275 23.5129 18.953 23.3837 18.953H8.6152C8.35408 18.953 8.10365 18.8492 7.91901 18.6645C7.73437 18.4799 7.63064 18.2294 7.63064 17.9683V16.9836C7.63064 16.7224 7.73437 16.472 7.91901 16.2873C8.10365 16.1026 8.35408 15.9989 8.6152 15.9989H23.3837C23.6448 15.9989 23.8952 16.1026 24.0798 16.2873C24.2645 16.472 24.3682 16.7224 24.3682 16.9836V17.9683Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function ReferenceAnchorIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 32 32" fill="none" aria-hidden>
+      <path
+        d="M29.5384 21.9691L28.0615 15.6922C27.8769 15.0153 27.0153 14.7691 26.523 15.1999L21.7846 19.5691C21.2307 20.0615 21.4769 20.923 22.1538 21.1076L24.1846 21.723L23.5692 22.9538C22.4615 24.7999 20.6769 25.9691 17.8461 26.3384V10.9538C18.6504 10.6056 19.3354 10.0297 19.8165 9.2971C20.2976 8.5645 20.5539 7.70715 20.5538 6.83069C20.5538 4.36915 18.523 2.33838 16.0615 2.33838C14.8701 2.33838 13.7274 2.81167 12.8849 3.65415C12.0425 4.49662 11.5692 5.63925 11.5692 6.83069C11.5692 8.67684 12.6769 10.2153 14.2769 10.9538V26.3384C11.4461 25.9691 9.66149 24.7999 8.5538 22.9538L7.93841 21.723L9.96918 21.1076C10.6461 20.923 10.8307 19.9999 10.3384 19.5691L5.53841 15.2615C4.98457 14.7691 4.18457 15.0153 3.99995 15.7538L2.46149 21.9691C2.27687 22.6461 2.9538 23.2615 3.63072 23.0768L5.23072 22.5845C5.47687 23.2615 5.72303 23.8768 6.09226 24.4922C7.87687 27.5076 11.1384 29.2922 15.9384 29.2922C20.7384 29.2922 23.9384 27.5076 25.7846 24.4922C26.1538 23.8768 26.4615 23.1999 26.6461 22.5845L28.2461 23.0768C29.0461 23.2615 29.6615 22.6461 29.5384 21.9691ZM16 8.73838C15.7656 8.73838 15.5335 8.69222 15.317 8.60253C15.1005 8.51285 14.9038 8.38139 14.738 8.21568C14.5723 8.04996 14.4409 7.85323 14.3512 7.63671C14.2615 7.42019 14.2153 7.18812 14.2153 6.95376C14.2153 6.7194 14.2615 6.48734 14.3512 6.27082C14.4409 6.0543 14.5723 5.85757 14.738 5.69185C14.9038 5.52613 15.1005 5.39468 15.317 5.30499C15.5335 5.21531 15.7656 5.16915 16 5.16915C16.4733 5.16915 16.9272 5.35717 17.2619 5.69185C17.5965 6.02653 17.7846 6.48045 17.7846 6.95376C17.7846 7.42707 17.5965 7.881 17.2619 8.21568C16.9272 8.55036 16.4733 8.73838 16 8.73838Z"
         fill="currentColor"
       />
     </svg>

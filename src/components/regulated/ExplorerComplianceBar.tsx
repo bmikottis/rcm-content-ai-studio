@@ -72,17 +72,6 @@ export function ExplorerComplianceBar() {
       >
         Submit all content for review
       </button>
-      <p className="mt-1.5 text-[9px] leading-relaxed text-[var(--text-muted)]">
-        <span className="inline-flex items-center gap-0.5">
-          <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-600" aria-hidden />
-          Indigo = claim suggestions
-        </span>
-        {" · "}
-        <span className="inline-flex items-center gap-0.5">
-          <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden />
-          Flags = handoff in details
-        </span>
-      </p>
       {expanded && (
         <div className="mt-2 max-h-40 overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--surface-subtle)] px-2 py-1.5">
           {issues.length === 0 ? (

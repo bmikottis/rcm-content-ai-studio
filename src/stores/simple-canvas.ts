@@ -5,6 +5,7 @@ import { useRegulatedContentStore, elementKey } from "@/stores/regulated-content
 import { buildMakanaOncuraEmailCards } from "@/data/makana-pharma-canvas";
 
 let _compliancePulseTimer: ReturnType<typeof setTimeout> | null = null;
+let _linkedClaimFocusTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Selected element reference
 export interface SelectedElement {
@@ -42,6 +43,8 @@ interface SimpleCanvasState {
   generatedImages: Array<{ id: string; src: string; alt: string }>;
   /** `${cardId}:${elementId}` — transient highlight when jumping from inspector flags */
   compliancePulseKey: string | null;
+  /** Claim code to emphasize after linked-claim jump (e.g. `RCS-0003`). */
+  focusedLinkedClaimCode: string | null;
 }
 
 interface SimpleCanvasStore extends SimpleCanvasState {
@@ -52,6 +55,7 @@ interface SimpleCanvasStore extends SimpleCanvasState {
   fitToContent: () => void;
   focusCard: (id: string) => void;
   pulseComplianceOnElement: (cardId: string, elementId: string) => void;
+  focusLinkedClaimCode: (code: string) => void;
 
   // Selection
   selectCard: (id: string | null) => void;
@@ -177,6 +181,7 @@ const initialState: SimpleCanvasState = {
   selectedGroupId: null,
   generatedImages: [],
   compliancePulseKey: null,
+  focusedLinkedClaimCode: null,
 };
 
 function buildWilliamsSonomaInitialCards(): ChannelCard[] {
@@ -800,6 +805,18 @@ export const useSimpleCanvasStore = create<SimpleCanvasStore>((set, get) => ({
     }, 3200);
   },
 
+  focusLinkedClaimCode: (code) => {
+    if (_linkedClaimFocusTimer) {
+      clearTimeout(_linkedClaimFocusTimer);
+      _linkedClaimFocusTimer = null;
+    }
+    set({ focusedLinkedClaimCode: code });
+    _linkedClaimFocusTimer = setTimeout(() => {
+      set((s) => (s.focusedLinkedClaimCode === code ? { focusedLinkedClaimCode: null } : {}));
+      _linkedClaimFocusTimer = null;
+    }, 3200);
+  },
+
   fitToContent: () => {
     const { cards } = get();
     if (cards.length === 0) return;
@@ -871,6 +888,10 @@ export const useSimpleCanvasStore = create<SimpleCanvasStore>((set, get) => ({
       clearTimeout(_compliancePulseTimer);
       _compliancePulseTimer = null;
     }
+    if (_linkedClaimFocusTimer) {
+      clearTimeout(_linkedClaimFocusTimer);
+      _linkedClaimFocusTimer = null;
+    }
     set({
       selectedCardId: null,
       selectedCardIds: [],
@@ -878,6 +899,7 @@ export const useSimpleCanvasStore = create<SimpleCanvasStore>((set, get) => ({
       selectedVariantId: null,
       selectedGroupId: null,
       compliancePulseKey: null,
+      focusedLinkedClaimCode: null,
     });
   },
 
@@ -886,7 +908,7 @@ export const useSimpleCanvasStore = create<SimpleCanvasStore>((set, get) => ({
   },
 
   clearElementSelection: () => {
-    set({ selectedElement: null });
+    set({ selectedElement: null, focusedLinkedClaimCode: null });
   },
 
   addCard: (card) => {

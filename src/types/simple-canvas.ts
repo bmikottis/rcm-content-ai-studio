@@ -41,6 +41,7 @@ export interface ContentElement {
   id: string;
   type: "image" | "headline" | "body" | "cta" | "divider";
   content: string;
+  linkedClaimCodes?: string[];
   imageData?: ImageData;
   isLoading?: boolean;
   imageVariations?: ImageVariations;

@@ -6,9 +6,10 @@ import {
   useRegulatedContentStore,
   filterClaimsForContext,
   elementKey,
+  APPROVED_CLAIMS,
   type ApprovedClaim,
 } from "@/stores/regulated-content";
-import { extractLinkedClaimCodes } from "@/lib/linked-claims";
+import { extractVisibleLinkedClaimCodes } from "@/lib/linked-claims";
 import type { ChannelCard, ContentElement } from "@/types/simple-canvas";
 
 interface InlineClaimsSuggestionsProps {
@@ -27,7 +28,10 @@ export function InlineClaimsSuggestions({ card, element, readOnly = false }: Inl
 
   const key = elementKey(card.id, element.id);
   const dismissed = dismissedByElement[key] ?? [];
-  const linkedClaimCodes = useMemo(() => extractLinkedClaimCodes(element.content), [element.content]);
+  const linkedClaimCodes = useMemo(
+    () => extractVisibleLinkedClaimCodes(element, APPROVED_CLAIMS),
+    [element],
+  );
   const isLogoImageBlock = useMemo(() => {
     if (element.type !== "image") return false;
     const src = element.imageData?.src?.toLowerCase() ?? "";
@@ -180,20 +184,26 @@ function applyClaim(
   element: ContentElement,
   claim: ApprovedClaim,
 ) {
-  if (element.type === "image") {
+  const liveCard = useSimpleCanvasStore.getState().cards.find((c) => c.id === cardId);
+  const liveElement = liveCard?.elements.find((e) => e.id === element.id) ?? element;
+
+  if (liveElement.type === "image") {
+    const nextCodes = Array.from(new Set([...(liveElement.linkedClaimCodes ?? []), claim.code]));
     updateElement(cardId, element.id, {
       content: claim.title,
+      linkedClaimCodes: nextCodes,
       imageData: {
-        ...(element.imageData ?? { src: "", alt: "", fit: "cover" }),
+        ...(liveElement.imageData ?? { src: "", alt: "", fit: "cover" }),
         alt: claim.body.slice(0, 220),
       },
     });
     return;
   }
 
-  const prefix = element.content.trim() ? `${element.content.trim()}\n\n` : "";
-  const stamp = `[Approved claim ${claim.code}]`;
+  const prefix = liveElement.content.trim() ? `${liveElement.content.trim()}\n\n` : "";
+  const nextCodes = Array.from(new Set([...(liveElement.linkedClaimCodes ?? []), claim.code]));
   updateElement(cardId, element.id, {
-    content: `${prefix}${stamp}\n${claim.body}`,
+    content: `${prefix}${claim.body}`,
+    linkedClaimCodes: nextCodes,
   });
 }
