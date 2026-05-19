@@ -53,7 +53,7 @@ const ISI_STUB =
 
 type PresetTransform = (text: string) => string;
 
-const PRESET_TRANSFORMS: Record<string, PresetTransform> = {
+export const PRESET_TRANSFORMS: Record<string, PresetTransform> = {
   "preserve-claim": (text) => {
     // Annotates with MLR placeholder — no content change
     const trimmed = text.trim();

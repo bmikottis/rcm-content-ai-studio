@@ -65,7 +65,7 @@ export default function RootLayout({
           crossOrigin="anonymous"
         />
       </head>
-      <body className="min-h-full flex flex-col antialiased bg-[var(--background)] text-[var(--text-primary)]">
+      <body className="min-h-full flex flex-col antialiased bg-[var(--background)] text-[var(--text-primary)]" suppressHydrationWarning>
         <AuthProvider>
           <ThemeInitializer />
           <PagesBootstrap />

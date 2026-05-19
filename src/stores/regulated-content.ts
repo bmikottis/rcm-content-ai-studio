@@ -1,5 +1,94 @@
 import { create } from "zustand";
 
+export type ObligationCategory = "regulatory" | "brand";
+
+export interface ObligationItem {
+  id: string;
+  category: ObligationCategory;
+  title: string;
+  referenceLabel: string;
+  referenceHref: string;
+  /** Critical obligations (Fair Balance, Boxed Warning) block submit and flash a warning highlight. */
+  isCritical: boolean;
+}
+
+export const OBLIGATION_ITEMS: ObligationItem[] = [
+  // ── Regulatory (FDA/OPDP) ──────────────────────────────────────────────────
+  {
+    id: "obl-true-indication",
+    category: "regulatory",
+    title: "True Statement of Indication",
+    referenceLabel: "ONCURA US PI v3.2",
+    referenceHref: "#oncura-pi-us-v3-2",
+    isCritical: false,
+  },
+  {
+    id: "obl-fair-balance",
+    category: "regulatory",
+    title: "Fair Balance (ISI Placement)",
+    referenceLabel: "ONCURA ISI Template (US)",
+    referenceHref: "#oncura-isi-template-us",
+    isCritical: true,
+  },
+  {
+    id: "obl-boxed-warning",
+    category: "regulatory",
+    title: "Boxed Warning Prominence",
+    referenceLabel: "FDA OPDP Guidance 2024",
+    referenceHref: "https://www.fda.gov/patients/learn-about-drug-and-device-approvals/drug-development-process",
+    isCritical: true,
+  },
+  {
+    id: "obl-pi-link",
+    category: "regulatory",
+    title: "Direct Link to Prescribing Information (PI)",
+    referenceLabel: "ONCURA US PI v3.2",
+    referenceHref: "#oncura-pi-us-v3-2",
+    isCritical: false,
+  },
+  {
+    id: "obl-substantiated-claims",
+    category: "regulatory",
+    title: "Substantiated Claims Only",
+    referenceLabel: "ONCURA MLR Approved Core Deck",
+    referenceHref: "#oncura-core-slide-deck-mlr",
+    isCritical: false,
+  },
+  // ── Brand Guidelines ──────────────────────────────────────────────────────
+  {
+    id: "obl-core-narrative",
+    category: "brand",
+    title: "Verbatim Core Medical Narrative",
+    referenceLabel: "Brand Guidelines v3.2",
+    referenceHref: "#brand-guidelines-v3-2",
+    isCritical: false,
+  },
+  {
+    id: "obl-brand-visuals",
+    category: "brand",
+    title: "Pre-Approved Brand Visuals",
+    referenceLabel: "ONCURA DAM Visual Library",
+    referenceHref: "#oncura-dam-mech-v3-2",
+    isCritical: false,
+  },
+  {
+    id: "obl-audience-lock",
+    category: "brand",
+    title: "Clear Audience Segment (HCP)",
+    referenceLabel: "Brand Content Standards v2.1",
+    referenceHref: "#brand-content-standards-v2-1",
+    isCritical: false,
+  },
+  {
+    id: "obl-layout-safeguards",
+    category: "brand",
+    title: "Layout and Formatting Safeguards",
+    referenceLabel: "ONCURA Email Layout Template",
+    referenceHref: "#oncura-email-layout-template",
+    isCritical: false,
+  },
+];
+
 export type RegulatedContentType = "hcp_email" | "dtc_email" | "multichannel";
 export type RegulatedAudience = "hcp" | "patient" | "payer";
 export type RegulatedRegion = "us" | "eu_uk" | "jp" | "global";
@@ -164,12 +253,22 @@ interface RegulatedContentState {
   creatorComplianceFlags: Record<string, boolean>;
   /** Dismissed non-blocking compliance flags by element key (`${cardId}:${elementId}`). */
   dismissedComplianceFlags: Record<string, boolean>;
+  /** Transient ping — set to a claim code to animate + scroll the sidebar card, auto-clears after 1800ms */
+  pingLinkedClaimCode: string | null;
+  /** Manual obligation overrides — null means defer to auto-detected value. */
+  manualObligationOverrides: Record<string, boolean | null>;
+  /** Obligation IDs currently flashing a warning highlight (triggered on submit when critical obligations are unmet). */
+  highlightedObligationIds: string[];
   setProfile: (partial: Partial<RegulatedProfile>) => void;
   dismissClaim: (elementKey: string, claimId: string) => void;
   clearDismissedForElement: (elementKey: string) => void;
   toggleCreatorComplianceFlag: (elementKey: string) => void;
   dismissComplianceFlag: (elementKey: string) => void;
   restoreComplianceFlag: (elementKey: string) => void;
+  pingClaim: (code: string) => void;
+  setObligationOverride: (id: string, value: boolean | null) => void;
+  setHighlightedObligationIds: (ids: string[]) => void;
+  clearObligationHighlights: () => void;
 }
 
 export const useRegulatedContentStore = create<RegulatedContentState>((set) => ({
@@ -177,6 +276,9 @@ export const useRegulatedContentStore = create<RegulatedContentState>((set) => (
   dismissedByElement: {},
   creatorComplianceFlags: {},
   dismissedComplianceFlags: {},
+  pingLinkedClaimCode: null,
+  manualObligationOverrides: {},
+  highlightedObligationIds: [],
 
   setProfile: (partial) =>
     set((s) => ({
@@ -222,6 +324,22 @@ export const useRegulatedContentStore = create<RegulatedContentState>((set) => (
       const { [elementKey]: _, ...rest } = s.dismissedComplianceFlags;
       return { dismissedComplianceFlags: rest };
     }),
+
+  pingClaim: (code) => {
+    set({ pingLinkedClaimCode: code });
+    setTimeout(() => {
+      set((s) => (s.pingLinkedClaimCode === code ? { pingLinkedClaimCode: null } : s));
+    }, 1800);
+  },
+
+  setObligationOverride: (id, value) =>
+    set((s) => ({
+      manualObligationOverrides: { ...s.manualObligationOverrides, [id]: value },
+    })),
+
+  setHighlightedObligationIds: (ids) => set({ highlightedObligationIds: ids }),
+
+  clearObligationHighlights: () => set({ highlightedObligationIds: [] }),
 }));
 
 export function elementKey(cardId: string, elementId: string): string {

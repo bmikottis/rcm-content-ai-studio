@@ -21,7 +21,7 @@ import { scanCardsForCompliance } from "@/lib/compliance-scan";
 import { extractVisibleLinkedClaimCodes, stripApprovedClaimStamps } from "@/lib/linked-claims";
 import { ComplianceFlagIcon } from "@/components/regulated/ComplianceFlagIcon";
 import { ElementSidePanel, RephraseIcon } from "@/components/regulated/ElementSidePanel";
-import { RephraseElementPopup } from "@/components/regulated/RephraseElementPopup";
+import { MorphedClaimHighlight } from "@/components/regulated/MorphedClaimHighlight";
 
 interface SimpleCanvasProps {
   className?: string;
@@ -309,7 +309,7 @@ export function SimpleCanvas({ className }: SimpleCanvasProps) {
     setPanning(false);
   }, [getCardsInRect, selectMultipleCards, clearSelection, setPanning]);
 
-  const handleWheel = useCallback((e: React.WheelEvent) => {
+  const handleWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
     if (e.ctrlKey || e.metaKey) {
       const delta = -e.deltaY * 0.002;
@@ -318,6 +318,14 @@ export function SimpleCanvas({ className }: SimpleCanvasProps) {
       pan(-e.deltaX, -e.deltaY);
     }
   }, [zoom, pan]);
+
+  // Attach wheel handler with passive:false so preventDefault() is allowed
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, [handleWheel]);
 
   const handleCanvasClick = useCallback((_e: React.MouseEvent) => {
     if (document.activeElement instanceof HTMLElement) {
@@ -380,7 +388,6 @@ export function SimpleCanvas({ className }: SimpleCanvasProps) {
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
-        onWheel={handleWheel}
         onClick={handleCanvasClick}
       >
         {/* Transformed content layer */}
@@ -707,12 +714,7 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
     [projectId, card.channel, card.elements],
   );
 
-  const { moveCard, moveCards, addElement, insertElement, updateElement, addVariant, removeVariant, updateVariantElement, selectVariant, selectedVariantId, cardGroups, removeFromGroup, selectedElement, selectElement, selectImageVariation, setImageVariationsRefreshing, setImageVariations, addGeneratedImages } = useSimpleCanvasStore();
-
-  // Side panel — active text element for this card
-  const [rephraseOpen, setRephraseOpen] = useState(false);
-  const [rephraseTargetElement, setRephraseTargetElement] = useState<ContentElement | null>(null);
-  const [rephraseSelection, setRephraseSelection] = useState<{ elementId: string; selectedText: string } | null>(null);
+  const { moveCard, moveCards, addElement, insertElement, updateElement, addVariant, removeVariant, updateVariantElement, selectVariant, selectedVariantId, cardGroups, removeFromGroup, selectedElement, selectElement, selectImageVariation, setImageVariationsRefreshing, setImageVariations, addGeneratedImages, setRephraseTarget } = useSimpleCanvasStore();
 
   const activeElement = useMemo(() => {
     if (!selectedElement || selectedElement.cardId !== card.id) return null;
@@ -1104,7 +1106,6 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
                     readOnly={isLockedInReview}
                     regulatedClaimsAnchor={regulatedEmailAnchors.claimHintIds.has(element.id)}
                     regulatedFlagAnchor={regulatedEmailAnchors.flagIds.has(element.id)}
-                    onTextSelectionChange={setRephraseSelection}
                     onChange={(newContent) => handleElementChange(element.id, newContent)}
                   />
                 </div>
@@ -1218,7 +1219,6 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
                       regulatedClaimsAnchor={variantAnchors.claimHintIds.has(element.id)}
                       regulatedFlagAnchor={variantAnchors.flagIds.has(element.id)}
                       includeComplianceScan={false}
-                      onTextSelectionChange={setRephraseSelection}
                       onChange={(newContent) => updateVariantElement(card.id, variant.id, element.id, { content: newContent })}
                     />
                   ))}
@@ -1282,15 +1282,9 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
               actions={[
                 {
                   id: "rephrase",
-                  label:
-                    rephraseSelection && rephraseSelection.elementId === activeElement.id
-                      ? "Rephrase selected text"
-                      : "Rephrase block",
+                  label: "Rephrase block",
                   icon: <RephraseIcon />,
-                  onClick: () => {
-                    setRephraseTargetElement(activeElement);
-                    setRephraseOpen(true);
-                  },
+                  onClick: () => setRephraseTarget({ cardId: card.id, elementId: activeElement.id }),
                 },
               ]}
             />
@@ -1298,22 +1292,6 @@ function ChannelCardComponent({ card, index, isSelected, onSelect }: ChannelCard
         )}
       </AnimatePresence>
 
-      {/* Rephrase popup — rendered as portal so it escapes canvas zoom transform */}
-      <AnimatePresence>
-        {rephraseOpen && rephraseTargetElement && (
-          <RephraseElementPopup
-            cardId={card.id}
-            element={rephraseTargetElement}
-            channel={card.channel}
-            selectedText={
-              rephraseSelection && rephraseSelection.elementId === rephraseTargetElement.id
-                ? rephraseSelection.selectedText
-                : undefined
-            }
-            onClose={() => setRephraseOpen(false)}
-          />
-        )}
-      </AnimatePresence>
     </motion.div>
   );
 }
@@ -1375,6 +1353,7 @@ function EditableElement({
   const dismissedByElement = useRegulatedContentStore((s) => s.dismissedByElement);
   const creatorFlags = useRegulatedContentStore((s) => s.creatorComplianceFlags);
   const dismissedComplianceFlags = useRegulatedContentStore((s) => s.dismissedComplianceFlags);
+  const pingClaim = useRegulatedContentStore((s) => s.pingClaim);
 
   const ek = elementKey(cardId, element.id);
   const dismissed = dismissedByElement[ek] ?? [];
@@ -1460,6 +1439,47 @@ function EditableElement({
     () => (claimVariationPrompt ? claimVariationPrompt.nextContent : renderedContent),
     [claimVariationPrompt, renderedContent],
   );
+
+  // Persistent purple-underline rendering for linked_modified claim ranges
+  const morphedHighlightedContent = useMemo(() => {
+    const adjustments = element.linkedClaimAdjustments;
+    if (!adjustments) return null;
+    const morphedEntries = Object.entries(adjustments).filter(
+      ([, adj]) => adj.status === "linked_modified" && adj.editedText,
+    );
+    if (morphedEntries.length === 0) return null;
+
+    let remaining = renderedContent;
+    const parts: React.ReactNode[] = [];
+    let partKey = 0;
+
+    for (const [code, adj] of morphedEntries) {
+      const needle = adj.editedText!;
+      const idx = remaining.indexOf(needle);
+      if (idx === -1) continue;
+
+      // Text before the morphed range
+      if (idx > 0) parts.push(<span key={partKey++}>{remaining.slice(0, idx)}</span>);
+
+      const originalVerbatim = APPROVED_CLAIMS.find((c) => c.code === code)?.body ?? needle;
+      parts.push(
+        <MorphedClaimHighlight
+          key={partKey++}
+          claimCode={code}
+          originalVerbatim={adj.originalText || originalVerbatim}
+          onPingRequest={pingClaim}
+          persistent
+        >
+          {needle}
+        </MorphedClaimHighlight>,
+      );
+
+      remaining = remaining.slice(idx + needle.length);
+    }
+
+    if (remaining) parts.push(<span key={partKey++}>{remaining}</span>);
+    return parts.length > 0 ? parts : null;
+  }, [element.linkedClaimAdjustments, renderedContent, pingClaim]);
   const buildHighlightedClaimContent = useCallback((sourceText: string) => {
     if (linkedClaimCodes.length === 0) return null;
     const linkedClaims = linkedClaimCodes
@@ -2001,9 +2021,9 @@ function EditableElement({
             title={readOnly ? undefined : "Double-click to edit"}
           >
             {isElementSelected && linkedClaimHighlightedContent ? (
-              <>
-                {linkedClaimHighlightedContent}
-              </>
+              <>{linkedClaimHighlightedContent}</>
+            ) : morphedHighlightedContent ? (
+              <>{morphedHighlightedContent}</>
             ) : (
               activeDisplayContent
             )}
@@ -2065,9 +2085,9 @@ function EditableElement({
             title={readOnly ? undefined : "Double-click to edit"}
           >
             {isElementSelected && linkedClaimHighlightedContent ? (
-              <>
-                {linkedClaimHighlightedContent}
-              </>
+              <>{linkedClaimHighlightedContent}</>
+            ) : morphedHighlightedContent ? (
+              <>{morphedHighlightedContent}</>
             ) : (
               activeDisplayContent
             )}

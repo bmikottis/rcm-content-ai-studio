@@ -6,9 +6,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useSimpleCanvasStore } from "@/stores/simple-canvas";
 import { useCanvasStore } from "@/stores/canvas";
 import { ContentElement } from "@/types/simple-canvas";
-import { getPresetsForContext, applyRephrasePreset } from "@/data/rephrase-presets";
-import { APPROVED_CLAIMS } from "@/stores/regulated-content";
-import { InlineDiff } from "@/components/canvas/InlineDiff";
+import { getPresetsForContext } from "@/data/rephrase-presets";
+import { APPROVED_CLAIMS, useRegulatedContentStore } from "@/stores/regulated-content";
+import { applyRephraseWithMorphing, ClaimMorphResult } from "@/lib/claim-morph";
+import { ClaimAnnotatedPreview } from "@/components/regulated/ClaimAnnotatedPreview";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/cn";
 
@@ -19,6 +20,7 @@ interface RephraseElementPopupProps {
   element: ContentElement;
   channel: "email" | "sms";
   selectedText?: string;
+  linkedClaims?: Array<{ code: string; body: string; title: string }>;
   onClose: () => void;
 }
 
@@ -27,6 +29,7 @@ export function RephraseElementPopup({
   element,
   channel,
   selectedText,
+  linkedClaims,
   onClose,
 }: RephraseElementPopupProps) {
   if (typeof document === "undefined") return null;
@@ -37,6 +40,7 @@ export function RephraseElementPopup({
       element={element}
       channel={channel}
       selectedText={selectedText}
+      linkedClaims={linkedClaims}
       onClose={onClose}
     />,
     document.body,
@@ -47,18 +51,21 @@ function RephrasePopupContent({
   cardId,
   element,
   selectedText,
+  linkedClaims,
   onClose,
 }: RephraseElementPopupProps) {
   const [phase, setPhase] = useState<Phase>("prompt");
   const [selectedPresets, setSelectedPresets] = useState<string[]>([]);
   const [customPrompt, setCustomPrompt] = useState("");
   const [regeneratedContent, setRegeneratedContent] = useState("");
+  const [morphedClaims, setMorphedClaims] = useState<ClaimMorphResult["morphedClaims"]>({});
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const projectId = useCanvasStore((s) => s.projectId);
   const regulated = projectId === "proj-pharma-email";
   const presets = getPresetsForContext(regulated);
   const updateElement = useSimpleCanvasStore((s) => s.updateElement);
+  const pingClaim = useRegulatedContentStore((s) => s.pingClaim);
   const hasSelectionTarget = Boolean(selectedText && selectedText.trim().length > 0);
 
   // Close on Escape
@@ -89,63 +96,83 @@ function RephrasePopupContent({
     if (!canSubmit) return;
     setPhase("regenerating");
 
-    // Simulate AI regeneration delay
     await new Promise((r) => setTimeout(r, 1200));
 
-    const sourceContent = hasSelectionTarget ? selectedText!.trim() : element.content;
-    const { newContent } = applyRephrasePreset(
-      sourceContent,
+    // Always operate on the full element content
+    const result = applyRephraseWithMorphing(
+      element.content,
+      linkedClaims ?? [],
       selectedPresets,
       customPrompt,
     );
 
-    setRegeneratedContent(newContent);
+    setRegeneratedContent(result.newContent);
+    setMorphedClaims(result.morphedClaims);
     setPhase("diff");
   };
 
   const handleAccept = () => {
     const preserveClaimText = selectedPresets.includes("preserve-claim");
-    const fallbackContent = hasSelectionTarget
-      ? replaceFirstMatch(element.content, selectedText!.trim(), regeneratedContent)
-      : regeneratedContent;
-    const finalContent = fallbackContent;
+    // Always replace the full element content
+    const finalContent = regeneratedContent;
     const linkedClaimCodes = element.linkedClaimCodes ?? [];
+    const nextAdjustments = { ...(element.linkedClaimAdjustments ?? {}) };
+
+    // Write linked_modified entries for successfully morphed claims
+    const morphedEntries = Object.entries(morphedClaims);
+    for (const [code, { original, morphed }] of morphedEntries) {
+      nextAdjustments[code] = {
+        status: "linked_modified",
+        comment: "AI rephrased via Smart Rephrase",
+        originalText: original,
+        editedText: morphed,
+        updatedAt: Date.now(),
+      };
+    }
+
+    // For claims that are NOT morphed but have drifted, write pending_variation_review
+    const morphedCodes = new Set(morphedEntries.map(([code]) => code));
     const driftedClaimCodes =
       preserveClaimText || linkedClaimCodes.length === 0
         ? []
         : linkedClaimCodes.filter((code) => {
+            if (morphedCodes.has(code)) return false;
             const approved = APPROVED_CLAIMS.find((c) => c.code === code);
             if (!approved) return false;
             return !finalContent.includes(approved.body);
           });
 
-    if (driftedClaimCodes.length > 0) {
-      const nextAdjustments = { ...(element.linkedClaimAdjustments ?? {}) };
-      for (const code of driftedClaimCodes) {
-        const base = APPROVED_CLAIMS.find((c) => c.code === code);
-        nextAdjustments[code] = {
-          status: "pending_variation_review",
-          comment: "Generated via Rephrase without preserve claim text.",
-          originalText: base?.body ?? "",
-          editedText: extractBestClaimSegment(finalContent, base?.body ?? ""),
-          updatedAt: Date.now(),
-        };
-      }
+    for (const code of driftedClaimCodes) {
+      const base = APPROVED_CLAIMS.find((c) => c.code === code);
+      nextAdjustments[code] = {
+        status: "pending_variation_review",
+        comment: "Generated via Rephrase without preserve claim text.",
+        originalText: base?.body ?? "",
+        editedText: extractBestClaimSegment(finalContent, base?.body ?? ""),
+        updatedAt: Date.now(),
+      };
+    }
+
+    const hasAdjustments = morphedEntries.length > 0 || driftedClaimCodes.length > 0;
+
+    if (hasAdjustments) {
       updateElement(cardId, element.id, {
         content: finalContent,
-        linkedClaimCodes: Array.from(new Set([...(element.linkedClaimCodes ?? []), ...driftedClaimCodes])),
+        linkedClaimCodes: Array.from(
+          new Set([...(element.linkedClaimCodes ?? []), ...driftedClaimCodes]),
+        ),
         linkedClaimAdjustments: nextAdjustments,
       });
-      onClose();
-      return;
+    } else {
+      updateElement(cardId, element.id, { content: finalContent });
     }
-    updateElement(cardId, element.id, { content: finalContent });
     onClose();
   };
 
   const handleTryAgain = () => {
     setPhase("prompt");
     setRegeneratedContent("");
+    setMorphedClaims({});
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -155,8 +182,7 @@ function RephrasePopupContent({
     }
   };
 
-  const diffOriginal = hasSelectionTarget ? selectedText!.trim() : element.content;
-  const noChange = regeneratedContent === diffOriginal;
+  const noChange = regeneratedContent === element.content;
 
   return (
     <>
@@ -199,6 +225,12 @@ function RephrasePopupContent({
                   <span className="text-[14px] font-semibold text-[var(--text-primary)]">
                     {hasSelectionTarget ? "Rephrase selection" : "Rephrase block"}
                   </span>
+                  {(linkedClaims?.length ?? 0) > 0 && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-semibold text-purple-700">
+                      <SmartRephraseIcon className="w-2.5 h-2.5" />
+                      Smart Rephrase
+                    </span>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -210,11 +242,6 @@ function RephrasePopupContent({
               </div>
 
               {/* Preset chips */}
-              {hasSelectionTarget && (
-                <p className="text-[12px] text-[var(--text-muted)] mb-2">
-                  Applying changes to selected text only.
-                </p>
-              )}
               <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)] mb-2">
                 Style options
               </p>
@@ -234,9 +261,7 @@ function RephrasePopupContent({
                           : "bg-[var(--surface)] text-[var(--text-secondary)] border-[var(--border)] hover:border-indigo-300 hover:text-indigo-700 hover:bg-indigo-50",
                       )}
                     >
-                      {active && (
-                        <span className="mr-1 text-indigo-200">✓</span>
-                      )}
+                      {active && <span className="mr-1 text-indigo-200">✓</span>}
                       {preset.label}
                     </button>
                   );
@@ -340,20 +365,31 @@ function RephrasePopupContent({
                 </button>
               </div>
 
+              {/* Morphed claims legend */}
+              {Object.keys(morphedClaims).length > 0 && (
+                <div className="flex items-center gap-1.5 mb-2 px-1">
+                  <span className="inline-block w-3 h-3 rounded-sm bg-purple-100 border-b-2 border-purple-500 flex-shrink-0" />
+                  <span className="text-[11px] text-purple-700 font-medium">
+                    Purple = AI-rephrased clinical claim — click to highlight in sidebar
+                  </span>
+                </div>
+              )}
+
               {noChange ? (
                 <p className="text-[13px] text-[var(--text-muted)] mb-4">
                   The selected options didn&apos;t produce a different result for this block. Try a different style or add a custom prompt.
                 </p>
               ) : (
                 <div className="rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-3 mb-4 max-h-48 overflow-y-auto">
-                  <InlineDiff
-                    original={diffOriginal}
-                    updated={regeneratedContent}
+                  <ClaimAnnotatedPreview
+                    content={regeneratedContent}
+                    morphedClaims={morphedClaims}
+                    onPing={pingClaim}
                   />
                 </div>
               )}
 
-              {/* Applied tags */}
+              {/* Applied style tags */}
               {(selectedPresets.length > 0 || customPrompt.trim()) && (
                 <div className="flex flex-wrap gap-1 mb-3">
                   {selectedPresets.map((id) => (
@@ -419,6 +455,22 @@ function RephraseIcon({ className }: { className?: string }) {
   );
 }
 
+function SmartRephraseIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
+  );
+}
+
 function CloseIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -450,12 +502,6 @@ function CheckIcon({ className }: { className?: string }) {
       <polyline points="20 6 9 17 4 12" />
     </svg>
   );
-}
-
-function replaceFirstMatch(source: string, selectedText: string, replacement: string): string {
-  const idx = source.indexOf(selectedText);
-  if (idx === -1) return source;
-  return source.slice(0, idx) + replacement + source.slice(idx + selectedText.length);
 }
 
 function extractBestClaimSegment(content: string, originalClaimText: string): string {

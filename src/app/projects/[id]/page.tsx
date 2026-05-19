@@ -258,12 +258,8 @@ export default function CanvasPage({
           {/* Top-right: account, Share, Publish */}
           <WorkspaceTopActions />
 
-          {!isPharmaEmailPrototype && (
-            <>
-              <CanvasHeader />
-              <AgentCommandBar />
-            </>
-          )}
+          {!isPharmaEmailPrototype && <CanvasHeader />}
+          <AgentCommandBar />
 
           {/* Right panel: channel inspector (canvas only) */}
           {viewMode === "canvas" && <ChannelInspector />}

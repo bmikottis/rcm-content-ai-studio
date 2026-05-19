@@ -12,6 +12,11 @@ import { AttachmentsMenu } from "@/components/composer/AttachmentsMenu";
 import { BriefMenu } from "@/components/composer/BriefMenu";
 import { BrandKitMenu } from "@/components/composer/BrandKitMenu";
 import { ChannelsMenu } from "@/components/composer/ChannelsMenu";
+import { ClaimAnnotatedPreview } from "@/components/regulated/ClaimAnnotatedPreview";
+import { applyRephraseWithMorphing, ClaimMorphResult } from "@/lib/claim-morph";
+import { APPROVED_CLAIMS, useRegulatedContentStore } from "@/stores/regulated-content";
+import { getPresetsForContext } from "@/data/rephrase-presets";
+import { useCanvasStore } from "@/stores/canvas";
 import { cn } from "@/lib/cn";
 import { useThemeStore } from "@/stores/theme";
 
@@ -59,6 +64,8 @@ type AgentPhase =
   | { phase: "analyzing"; prompt: string }
   | { phase: "clarify"; prompt: string; questionIndex: number };
 
+type RephrasePhase = "prompt" | "regenerating" | "diff" | null;
+
 export function AgentCommandBar() {
   const isDark = useThemeStore((s) => s.resolvedTheme === "dark");
   const [value, setValue] = useState("");
@@ -72,6 +79,12 @@ export function AgentCommandBar() {
   const refinementTimerRef = useRef<number | null>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [isNarrow, setIsNarrow] = useState(false);
+
+  const [rephrasePhase, setRephrasePhase] = useState<RephrasePhase>(null);
+  const [rephrasePresets, setRephrasePresets] = useState<string[]>([]);
+  const [rephraseCustom, setRephraseCustom] = useState("");
+  const [rephraseResult, setRephraseResult] = useState("");
+  const [rephraseMorphed, setRephraseMorphed] = useState<ClaimMorphResult["morphedClaims"]>({});
 
   useEffect(() => {
     const el = composerRef.current;
@@ -97,7 +110,9 @@ export function AgentCommandBar() {
     closeAgentPanel,
   } = useToolsStore();
 
-  const { selectedCardId: simpleSelectedCardId, selectedCardIds: simpleSelectedCardIds, selectedElement: simpleSelectedElement, cards: simpleCards, updateElement: simpleUpdateElement, updateCard: simpleUpdateCard, addVariant: simpleAddVariant, replaceImage: simpleReplaceImage, setImageVariations: simpleSetImageVariations, addGeneratedImages: simpleAddGeneratedImages, initialGenPhase, revealReserveTemplate } = useSimpleCanvasStore();
+  const { selectedCardId: simpleSelectedCardId, selectedCardIds: simpleSelectedCardIds, selectedElement: simpleSelectedElement, cards: simpleCards, updateElement: simpleUpdateElement, updateCard: simpleUpdateCard, addVariant: simpleAddVariant, replaceImage: simpleReplaceImage, setImageVariations: simpleSetImageVariations, addGeneratedImages: simpleAddGeneratedImages, initialGenPhase, revealReserveTemplate, rephraseTarget, clearRephraseTarget } = useSimpleCanvasStore();
+  const pingClaim = useRegulatedContentStore((s) => s.pingClaim);
+  const projectId = useCanvasStore((s) => s.projectId);
 
   const simpleCanvasContext = useMemo(() => {
     // Multi-selection context
@@ -121,6 +136,26 @@ export function AgentCommandBar() {
     return { label: card.title, context: `${card.channel.charAt(0).toUpperCase() + card.channel.slice(1)} channel` };
   }, [simpleSelectedCardId, simpleSelectedCardIds, simpleSelectedElement, simpleCards]);
 
+  const regulated = projectId === "proj-pharma-email";
+  const rephrasePresetOptions = useMemo(() => getPresetsForContext(regulated), [regulated]);
+
+  const rephraseElement = useMemo(() => {
+    if (!rephraseTarget) return null;
+    const card = simpleCards.find((c) => c.id === rephraseTarget.cardId);
+    return card?.elements.find((e) => e.id === rephraseTarget.elementId) ?? null;
+  }, [rephraseTarget, simpleCards]);
+
+  const rephraseLinkedClaims = useMemo(() => {
+    if (!rephraseElement) return [];
+    return (rephraseElement.linkedClaimCodes ?? [])
+      .map((code) => {
+        const claim = APPROVED_CLAIMS.find((c) => c.code === code);
+        if (!claim) return null;
+        return { code: claim.code, body: claim.body, title: claim.title };
+      })
+      .filter((c): c is { code: string; body: string; title: string } => c !== null);
+  }, [rephraseElement]);
+
   // Drive the analyzing UI when the canvas is running its initial generation
   useEffect(() => {
     if (initialGenPhase === "analyzing" || initialGenPhase === "generating") {
@@ -135,20 +170,20 @@ export function AgentCommandBar() {
 
   // Auto-expand when there is active processing
   useEffect(() => {
-    if (isThinking || refinement || agentPhase) setExpanded(true);
-  }, [isThinking, refinement, agentPhase]);
+    if (isThinking || refinement || agentPhase || rephrasePhase) setExpanded(true);
+  }, [isThinking, refinement, agentPhase, rephrasePhase]);
 
   // Collapse on click outside
   useEffect(() => {
     if (!expanded) return;
     const handler = (e: MouseEvent) => {
       if (composerRef.current && !composerRef.current.contains(e.target as Node)) {
-        if (!isThinking && !refinement && !agentPhase) setExpanded(false);
+        if (!isThinking && !refinement && !agentPhase && !rephrasePhase) setExpanded(false);
       }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [expanded, isThinking, refinement, agentPhase]);
+  }, [expanded, isThinking, refinement, agentPhase, rephrasePhase]);
 
   const contextLabel = useMemo(
     () => simpleCanvasContext?.context ?? getEditingContextLabel(groups, atomicBlocks, selectedIds, focusedChannel),
@@ -321,6 +356,100 @@ export function AgentCommandBar() {
   }, [clearRefinementTimer]);
 
   useEffect(() => () => clearRefinementTimer(), [clearRefinementTimer]);
+
+  // Watch rephraseTarget from store to enter rephrase flow
+  useEffect(() => {
+    if (rephraseTarget) {
+      setExpanded(true);
+      setRephrasePhase("prompt");
+      setRephrasePresets([]);
+      setRephraseCustom("");
+      setRephraseResult("");
+      setRephraseMorphed({});
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rephraseTarget]);
+
+  const handleRephraseClose = useCallback(() => {
+    setRephrasePhase(null);
+    clearRephraseTarget();
+  }, [clearRephraseTarget]);
+
+  const handleRephraseSubmit = useCallback(async () => {
+    if (!rephraseElement) return;
+    setRephrasePhase("regenerating");
+    await new Promise((r) => setTimeout(r, 1200));
+    const result = applyRephraseWithMorphing(
+      rephraseElement.content,
+      rephraseLinkedClaims,
+      rephrasePresets,
+      rephraseCustom,
+    );
+    setRephraseResult(result.newContent);
+    setRephraseMorphed(result.morphedClaims);
+    setRephrasePhase("diff");
+  }, [rephraseElement, rephraseLinkedClaims, rephrasePresets, rephraseCustom]);
+
+  const handleRephraseAccept = useCallback(() => {
+    if (!rephraseTarget || !rephraseElement) return;
+    const preserveClaimText = rephrasePresets.includes("preserve-claim");
+    const finalContent = rephraseResult;
+    const linkedClaimCodes = rephraseElement.linkedClaimCodes ?? [];
+    const nextAdjustments = { ...(rephraseElement.linkedClaimAdjustments ?? {}) };
+
+    const morphedEntries = Object.entries(rephraseMorphed);
+    for (const [code, { original, morphed }] of morphedEntries) {
+      nextAdjustments[code] = {
+        status: "linked_modified",
+        comment: "AI rephrased via Smart Rephrase",
+        originalText: original,
+        editedText: morphed,
+        updatedAt: Date.now(),
+      };
+    }
+
+    const morphedCodes = new Set(morphedEntries.map(([code]) => code));
+    const driftedClaimCodes =
+      preserveClaimText || linkedClaimCodes.length === 0
+        ? []
+        : linkedClaimCodes.filter((code) => {
+            if (morphedCodes.has(code)) return false;
+            const approved = APPROVED_CLAIMS.find((c) => c.code === code);
+            if (!approved) return false;
+            return !finalContent.includes(approved.body);
+          });
+
+    for (const code of driftedClaimCodes) {
+      const base = APPROVED_CLAIMS.find((c) => c.code === code);
+      nextAdjustments[code] = {
+        status: "pending_variation_review",
+        comment: "Generated via Rephrase without preserve claim text.",
+        originalText: base?.body ?? "",
+        editedText: rephraseExtractBestClaimSegment(finalContent, base?.body ?? ""),
+        updatedAt: Date.now(),
+      };
+    }
+
+    const hasAdjustments = morphedEntries.length > 0 || driftedClaimCodes.length > 0;
+
+    if (hasAdjustments) {
+      simpleUpdateElement(rephraseTarget.cardId, rephraseTarget.elementId, {
+        content: finalContent,
+        linkedClaimCodes: Array.from(new Set([...linkedClaimCodes, ...driftedClaimCodes])),
+        linkedClaimAdjustments: nextAdjustments,
+      });
+    } else {
+      simpleUpdateElement(rephraseTarget.cardId, rephraseTarget.elementId, { content: finalContent });
+    }
+
+    handleRephraseClose();
+  }, [rephraseTarget, rephraseElement, rephrasePresets, rephraseResult, rephraseMorphed, simpleUpdateElement, handleRephraseClose]);
+
+  const handleRephraseTryAgain = useCallback(() => {
+    setRephrasePhase("prompt");
+    setRephraseResult("");
+    setRephraseMorphed({});
+  }, []);
 
   const beginRefinement = useCallback(
     (promptStr: string) => {
@@ -588,7 +717,7 @@ export function AgentCommandBar() {
             isDark
               ? "shadow-[0_4px_24px_rgba(0,0,0,0.5),0_1px_4px_rgba(0,0,0,0.4)]"
               : "shadow-[0_4px_24px_rgba(0,0,0,0.14),0_1px_4px_rgba(0,0,0,0.10)]",
-            (isThinking || refinement?.phase === "thinking" || agentPhase?.phase === "analyzing")
+            (isThinking || refinement?.phase === "thinking" || agentPhase?.phase === "analyzing" || rephrasePhase === "regenerating")
               ? "gradient-glow"
               : "gradient-border",
           )}
@@ -880,6 +1009,127 @@ export function AgentCommandBar() {
               )}
             </AnimatePresence>
 
+            {/* Rephrase phase — prompt / regenerating / diff */}
+            <AnimatePresence initial={false}>
+              {rephrasePhase && (
+                <motion.div
+                  key="rephrase-phase"
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                  className={cn(
+                    "overflow-hidden rounded-t-[20px] border-b",
+                    isDark
+                      ? "border-white/10 bg-gradient-to-b from-[rgba(28,28,30,0.92)] to-[rgba(28,28,30,0.80)]"
+                      : "border-[var(--border)] bg-gradient-to-b from-white/90 to-white/75",
+                  )}
+                >
+                  <div className="px-4 pt-4 pb-4">
+                    <AnimatePresence mode="wait">
+                      {/* Header label */}
+                      <motion.div
+                        key="rephrase-header"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.15 }}
+                        className="flex items-center justify-between mb-3"
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className={cn("w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0", isDark ? "bg-violet-800/60" : "bg-violet-100")}>
+                            <RephraseBarIcon className={cn("w-3 h-3", isDark ? "text-violet-300" : "text-violet-600")} />
+                          </div>
+                          <span className={cn("text-[13px] font-semibold", isDark ? "text-white" : "text-[var(--text-primary)]")}>
+                            Rephrase block
+                          </span>
+                          {rephraseLinkedClaims.length > 0 && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-semibold text-purple-700">
+                              <SmartRephraseBarIcon className="w-2.5 h-2.5" />
+                              Smart Rephrase
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleRephraseClose}
+                          className={cn("w-5 h-5 rounded-md flex items-center justify-center transition-colors", isDark ? "text-white/40 hover:bg-white/10 hover:text-white/70" : "text-[var(--text-muted)] hover:bg-[var(--surface-active)]")}
+                        >
+                          <CloseBarIcon className="w-3 h-3" />
+                        </button>
+                      </motion.div>
+                    </AnimatePresence>
+
+                    <AnimatePresence mode="wait">
+                      {rephrasePhase === "regenerating" && (
+                        <motion.div
+                          key="rephrase-regenerating"
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          transition={{ duration: 0.15 }}
+                          className="flex items-center gap-3 py-2"
+                        >
+                          <div className="relative w-5 h-5 flex-shrink-0">
+                            <motion.div
+                              className={cn("absolute inset-0 rounded-full border-2", isDark ? "border-white/20 border-t-violet-400" : "border-violet-200 border-t-violet-600")}
+                              animate={{ rotate: 360 }}
+                              transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
+                            />
+                          </div>
+                          <p className={cn("text-[14px] font-medium", isDark ? "text-white" : "text-[var(--text-primary)]")}>
+                            Rephrasing copy…
+                          </p>
+                        </motion.div>
+                      )}
+                      {rephrasePhase === "diff" && (
+                        <motion.div
+                          key="rephrase-diff"
+                          initial={{ opacity: 0, y: 4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0 }}
+                          transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                        >
+                          {Object.keys(rephraseMorphed).length > 0 && (
+                            <div className="flex items-center gap-1.5 mb-2">
+                              <span className="inline-block w-3 h-3 rounded-sm bg-purple-100 border-b-2 border-purple-500 flex-shrink-0" />
+                              <span className="text-[11px] text-purple-700 font-medium">
+                                Purple = AI-rephrased clinical claim — click to highlight in sidebar
+                              </span>
+                            </div>
+                          )}
+                          <div className={cn("rounded-xl border px-3 py-3 max-h-40 overflow-y-auto", isDark ? "border-white/10 bg-white/[0.06]" : "border-[var(--border)] bg-[var(--background)]")}>
+                            <ClaimAnnotatedPreview
+                              content={rephraseResult}
+                              morphedClaims={rephraseMorphed}
+                              onPing={pingClaim}
+                            />
+                          </div>
+                          {(rephrasePresets.length > 0 || rephraseCustom.trim()) && (
+                            <div className="flex flex-wrap gap-1 mt-2">
+                              {rephrasePresets.map((id) => (
+                                <span
+                                  key={id}
+                                  className="h-5 px-2 rounded-full bg-violet-50 border border-violet-200 text-[10px] font-medium text-violet-700"
+                                >
+                                  {rephrasePresetOptions.find((p) => p.id === id)?.label ?? id}
+                                </span>
+                              ))}
+                              {rephraseCustom.trim() && (
+                                <span className={cn("h-5 px-2 rounded-full border text-[10px] font-medium max-w-[200px] truncate", isDark ? "border-white/15 bg-white/[0.06] text-white/60" : "border-[var(--border)] bg-[var(--surface-active)] text-[var(--text-secondary)]")}>
+                                  &quot;{rephraseCustom.trim()}&quot;
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {/* Input well — frosted white behind field + quick actions */}
             <div className="px-4 pt-3 pb-3">
               <div className={cn(
@@ -912,8 +1162,8 @@ export function AgentCommandBar() {
                     value={value}
                     onChange={(e) => setValue(e.target.value)}
                     onKeyDown={onKeyDown}
-                    placeholder="Ask Agentforce…"
-                    disabled={isThinking || refinement?.phase === "thinking" || agentPhase?.phase === "analyzing"}
+                    placeholder={rephrasePhase ? "Describe your change (optional)…" : "Ask Agentforce…"}
+                    disabled={isThinking || refinement?.phase === "thinking" || agentPhase?.phase === "analyzing" || rephrasePhase === "regenerating" || rephrasePhase === "diff"}
                     rows={1}
                     className={cn(
                       "min-h-[32px] flex-1 min-w-0 resize-none bg-transparent py-1.5",
@@ -926,7 +1176,7 @@ export function AgentCommandBar() {
                 </div>
 
                 <AnimatePresence initial={false}>
-                  {!value && (
+                  {!value && !rephrasePhase && (
                     <motion.div
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: "auto" }}
@@ -960,6 +1210,50 @@ export function AgentCommandBar() {
                     </motion.div>
                   )}
                 </AnimatePresence>
+
+                <AnimatePresence initial={false}>
+                  {rephrasePhase === "prompt" && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.15 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="flex flex-wrap gap-1.5 pt-2">
+                        {rephrasePresetOptions.map((preset) => {
+                          const active = rephrasePresets.includes(preset.id);
+                          return (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              title={preset.description}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setRephrasePresets((prev) =>
+                                  prev.includes(preset.id)
+                                    ? prev.filter((p) => p !== preset.id)
+                                    : [...prev, preset.id],
+                                );
+                              }}
+                              className={cn(
+                                "h-8 rounded-lg border px-3 text-[13px] font-medium transition-all duration-100",
+                                active
+                                  ? "bg-violet-600 text-white border-violet-600 shadow-sm"
+                                  : isDark
+                                    ? "border-white/20 bg-white/[0.08] text-white/80 hover:border-violet-400/60 hover:bg-violet-900/30"
+                                    : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-primary)] hover:border-violet-300 hover:text-violet-700 hover:bg-violet-50",
+                              )}
+                            >
+                              {active && <span className="mr-1 text-violet-200">✓</span>}
+                              {preset.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </div>
 
@@ -978,58 +1272,123 @@ export function AgentCommandBar() {
                 )}
               </div>
 
-              {/* Right: History + Send */}
+              {/* Right: Rephrase actions OR History + Send */}
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleHistoryClick}
-                  className={cn(
-                    "h-8 px-3 rounded-lg text-[13px] font-medium transition-all border flex items-center gap-1.5",
-                    showContextPanel && agentPanelHistoryOnly
-                      ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--background)]"
-                      : "bg-[var(--surface)] border-[var(--border)] text-[var(--text-primary)] hover:border-[var(--text-muted)] hover:bg-[var(--surface-hover)]",
-                  )}
-                  title="Open Agentforce history"
-                >
-                  <HistoryIcon className="w-3.5 h-3.5 opacity-80" />
-                  History
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void handleSubmit();
-                  }}
-                  disabled={
-                    isThinking ||
-                    refinement?.phase === "thinking" ||
-                    agentPhase?.phase === "analyzing" ||
-                    (!refinement && !agentPhase && !value.trim())
-                  }
-                  className={cn(
-                    "w-9 h-9 rounded-full flex-shrink-0",
-                    "flex items-center justify-center border backdrop-blur-sm",
-                    isDark
-                      ? "border-white/[0.22] bg-white/[0.16] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
-                      : "border-white/70 bg-white/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]",
-                    "transition-all duration-200 active:scale-95",
-                    !isThinking &&
-                      (refinement ? refinement.phase === "ready" : agentPhase?.phase === "clarify" || Boolean(value.trim()))
-                      ? isDark ? "text-[var(--text-primary)] hover:bg-white/[0.24]" : "text-[var(--text-primary)] hover:bg-white/70"
-                      : "text-[var(--text-muted)]",
-                  )}
-                >
-                  {isThinking ? (
-                    <motion.div
-                      animate={{ rotate: 360 }}
-                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                {rephrasePhase ? (
+                  <>
+                    {rephrasePhase === "diff" ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleRephraseTryAgain(); }}
+                          className={cn(
+                            "h-8 px-3 rounded-lg text-[13px] font-medium transition-all border",
+                            isDark
+                              ? "border-white/20 bg-white/[0.08] text-white/80 hover:bg-white/[0.14]"
+                              : "bg-[var(--surface)] border-[var(--border)] text-[var(--text-primary)] hover:border-[var(--text-muted)] hover:bg-[var(--surface-hover)]",
+                          )}
+                        >
+                          Try again
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleRephraseAccept(); }}
+                          disabled={rephraseResult === rephraseElement?.content}
+                          className="h-8 px-3 rounded-lg text-[13px] font-medium transition-all border bg-violet-600 border-violet-600 text-white hover:bg-violet-700 hover:border-violet-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                        >
+                          Apply
+                          <ArrowIcon className="w-3.5 h-3.5" />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleRephraseClose(); }}
+                          className={cn(
+                            "h-8 px-3 rounded-lg text-[13px] font-medium transition-all border",
+                            isDark
+                              ? "border-white/20 bg-white/[0.08] text-white/80 hover:bg-white/[0.14]"
+                              : "bg-[var(--surface)] border-[var(--border)] text-[var(--text-primary)] hover:border-[var(--text-muted)] hover:bg-[var(--surface-hover)]",
+                          )}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); void handleRephraseSubmit(); }}
+                          disabled={rephrasePhase === "regenerating" || (rephrasePresets.length === 0 && !value.trim())}
+                          className="h-8 px-3 rounded-lg text-[13px] font-medium transition-all border bg-violet-600 border-violet-600 text-white hover:bg-violet-700 hover:border-violet-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                        >
+                          {rephrasePhase === "regenerating" ? (
+                            <motion.div
+                              animate={{ rotate: 360 }}
+                              transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                            >
+                              <SpinnerIcon className="w-3.5 h-3.5" />
+                            </motion.div>
+                          ) : (
+                            <ArrowIcon className="w-3.5 h-3.5" />
+                          )}
+                          Regenerate
+                        </button>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleHistoryClick}
+                      className={cn(
+                        "h-8 px-3 rounded-lg text-[13px] font-medium transition-all border flex items-center gap-1.5",
+                        showContextPanel && agentPanelHistoryOnly
+                          ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--background)]"
+                          : "bg-[var(--surface)] border-[var(--border)] text-[var(--text-primary)] hover:border-[var(--text-muted)] hover:bg-[var(--surface-hover)]",
+                      )}
+                      title="Open Agentforce history"
                     >
-                      <SpinnerIcon className="w-4 h-4" />
-                    </motion.div>
-                  ) : (
-                    <ArrowIcon className="w-4 h-4" />
-                  )}
-                </button>
+                      <HistoryIcon className="w-3.5 h-3.5 opacity-80" />
+                      History
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleSubmit();
+                      }}
+                      disabled={
+                        isThinking ||
+                        refinement?.phase === "thinking" ||
+                        agentPhase?.phase === "analyzing" ||
+                        (!refinement && !agentPhase && !value.trim())
+                      }
+                      className={cn(
+                        "w-9 h-9 rounded-full flex-shrink-0",
+                        "flex items-center justify-center border backdrop-blur-sm",
+                        isDark
+                          ? "border-white/[0.22] bg-white/[0.16] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
+                          : "border-white/70 bg-white/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]",
+                        "transition-all duration-200 active:scale-95",
+                        !isThinking &&
+                          (refinement ? refinement.phase === "ready" : agentPhase?.phase === "clarify" || Boolean(value.trim()))
+                          ? isDark ? "text-[var(--text-primary)] hover:bg-white/[0.24]" : "text-[var(--text-primary)] hover:bg-white/70"
+                          : "text-[var(--text-muted)]",
+                      )}
+                    >
+                      {isThinking ? (
+                        <motion.div
+                          animate={{ rotate: 360 }}
+                          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                        >
+                          <SpinnerIcon className="w-4 h-4" />
+                        </motion.div>
+                      ) : (
+                        <ArrowIcon className="w-4 h-4" />
+                      )}
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -1089,4 +1448,74 @@ function CheckIcon({ className }: { className?: string }) {
       <polyline points="20 6 9 17 4 12" />
     </svg>
   );
+}
+
+function RephraseBarIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+      <path d="M21 3v5h-5" />
+      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+      <path d="M3 21v-5h5" />
+    </svg>
+  );
+}
+
+function SmartRephraseBarIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
+  );
+}
+
+function CloseBarIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  );
+}
+
+function rephraseExtractBestClaimSegment(content: string, originalClaimText: string): string {
+  const trimmedContent = content.trim();
+  if (!trimmedContent) return "";
+  const original = originalClaimText.trim();
+  if (!original) return "";
+  if (trimmedContent.includes(original)) return original;
+
+  const paragraphs = trimmedContent
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (paragraphs.length === 0) return original;
+
+  const tokenize = (value: string) =>
+    new Set(
+      value
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .split(/\s+/)
+        .filter((t) => t.length > 2),
+    );
+
+  const baseTokens = tokenize(original);
+  if (baseTokens.size === 0) return paragraphs[0];
+
+  let best = paragraphs[0];
+  let bestScore = -1;
+  for (const para of paragraphs) {
+    const paraTokens = tokenize(para);
+    let overlap = 0;
+    for (const token of paraTokens) {
+      if (baseTokens.has(token)) overlap += 1;
+    }
+    const score = overlap / Math.max(baseTokens.size, 1);
+    if (score > bestScore) {
+      best = para;
+      bestScore = score;
+    }
+  }
+  return best;
 }

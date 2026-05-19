@@ -3,8 +3,9 @@
 import { useCallback, useMemo, useState } from "react";
 import { useSimpleCanvasStore } from "@/stores/simple-canvas";
 import { useCanvasStore } from "@/stores/canvas";
-import { useRegulatedContentStore } from "@/stores/regulated-content";
+import { useRegulatedContentStore, OBLIGATION_ITEMS } from "@/stores/regulated-content";
 import { scanCardsForCompliance, complianceSummary, type ComplianceIssue } from "@/lib/compliance-scan";
+import { scanCardsForObligations, resolveObligations } from "@/lib/obligations-scan";
 import { cn } from "@/lib/cn";
 import { toast } from "@/stores/toast";
 
@@ -15,6 +16,9 @@ export function ExplorerComplianceBar() {
   const updateCard = useSimpleCanvasStore((s) => s.updateCard);
   const profile = useRegulatedContentStore((s) => s.profile);
   const creatorFlags = useRegulatedContentStore((s) => s.creatorComplianceFlags);
+  const manualObligationOverrides = useRegulatedContentStore((s) => s.manualObligationOverrides);
+  const setHighlightedObligationIds = useRegulatedContentStore((s) => s.setHighlightedObligationIds);
+  const clearObligationHighlights = useRegulatedContentStore((s) => s.clearObligationHighlights);
   const [expanded, setExpanded] = useState(false);
 
   const issues = useMemo(
@@ -32,13 +36,30 @@ export function ExplorerComplianceBar() {
       toast.info("No email blocks to submit. In-review, approved, or published content is unchanged.");
       return;
     }
+
+    // Check for unfulfilled critical obligations before advancing
+    const autoResults = scanCardsForObligations(emailCards);
+    const resolved = resolveObligations(autoResults, manualObligationOverrides);
+    const criticalUnfulfilled = OBLIGATION_ITEMS
+      .filter((item) => item.isCritical && !resolved[item.id])
+      .map((item) => item.id);
+
+    if (criticalUnfulfilled.length > 0) {
+      setHighlightedObligationIds(criticalUnfulfilled);
+      setTimeout(() => clearObligationHighlights(), 4000);
+      toast.warning(
+        `${criticalUnfulfilled.length} critical obligation${criticalUnfulfilled.length === 1 ? "" : "s"} unmet — review Obligations & Guardrails before submitting.`,
+      );
+      return;
+    }
+
     for (const c of toAdvance) {
       updateCard(c.id, { status: "review" });
     }
     toast.success(
       `${toAdvance.length} email block${toAdvance.length === 1 ? "" : "s"} submitted for review.`,
     );
-  }, [cards, updateCard]);
+  }, [cards, updateCard, manualObligationOverrides, setHighlightedObligationIds, clearObligationHighlights]);
 
   if (projectId !== "proj-pharma-email") return null;
 

@@ -45,6 +45,8 @@ interface SimpleCanvasState {
   compliancePulseKey: string | null;
   /** Claim code to emphasize after linked-claim jump (e.g. `RCS-0003`). */
   focusedLinkedClaimCode: string | null;
+  /** Set by ElementSidePanel to signal AgentCommandBar to enter rephrase mode. */
+  rephraseTarget: { cardId: string; elementId: string } | null;
 }
 
 interface SimpleCanvasStore extends SimpleCanvasState {
@@ -136,6 +138,10 @@ interface SimpleCanvasStore extends SimpleCanvasState {
   // Undo
   undo: () => void;
   
+  // Rephrase target
+  setRephraseTarget: (target: { cardId: string; elementId: string }) => void;
+  clearRephraseTarget: () => void;
+
   // Helpers
   getSelectedElementData: () => { card: ChannelCard; element: ContentElement } | null;
 }
@@ -182,6 +188,7 @@ const initialState: SimpleCanvasState = {
   generatedImages: [],
   compliancePulseKey: null,
   focusedLinkedClaimCode: null,
+  rephraseTarget: null,
 };
 
 function buildWilliamsSonomaInitialCards(): ChannelCard[] {
@@ -817,6 +824,9 @@ export const useSimpleCanvasStore = create<SimpleCanvasStore>((set, get) => ({
     }, 3200);
   },
 
+  setRephraseTarget: (target) => set({ rephraseTarget: target }),
+  clearRephraseTarget: () => set({ rephraseTarget: null }),
+
   fitToContent: () => {
     const { cards } = get();
     if (cards.length === 0) return;
@@ -900,6 +910,7 @@ export const useSimpleCanvasStore = create<SimpleCanvasStore>((set, get) => ({
       selectedGroupId: null,
       compliancePulseKey: null,
       focusedLinkedClaimCode: null,
+      rephraseTarget: null,
     });
   },
 

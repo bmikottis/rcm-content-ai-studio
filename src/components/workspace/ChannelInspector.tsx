@@ -16,6 +16,7 @@ import { scanCardsForCompliance, type ComplianceIssue } from "@/lib/compliance-s
 import { regulatedEmailChromeAnchors } from "@/lib/regulated-email-anchors";
 import { useRegulatedContentStore, elementKey, APPROVED_CLAIMS, filterClaimsForContext } from "@/stores/regulated-content";
 import { ComplianceFlagIcon } from "@/components/regulated/ComplianceFlagIcon";
+import { ObligationsChecklist } from "@/components/regulated/ObligationsChecklist";
 import { extractVisibleLinkedClaimCodes } from "@/lib/linked-claims";
 import { cn } from "@/lib/cn";
 import type { ChannelCard, CardVariant, ContentElement, CardStatus } from "@/types/simple-canvas";
@@ -1344,6 +1345,7 @@ export function ChannelInspector() {
                   <LinkedClaimsSection claims={linkedClaims} onClaimClick={handleLinkedClaimClick} />
                 )}
               </div>
+              <ObligationsChecklist />
             </>
             ) : (
             <>
@@ -1964,6 +1966,18 @@ function LinkedClaimsSection({
   }[];
   onClaimClick: (elementId: string, claimCode: string) => void;
 }) {
+  const pingCode = useRegulatedContentStore((s) => s.pingLinkedClaimCode);
+  const cardRefs = useRef<Record<string, HTMLLIElement | null>>({});
+
+  // Scroll the pinged card into view when ping fires
+  useEffect(() => {
+    if (!pingCode) return;
+    const el = cardRefs.current[pingCode];
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [pingCode]);
+
   return (
     <div className="px-4 py-3">
       {claims.length === 0 ? (
@@ -1973,6 +1987,7 @@ function LinkedClaimsSection({
           {claims.map((claim) => (
             <li
               key={claim.id}
+              ref={(el) => { cardRefs.current[claim.code] = el; }}
               role="button"
               tabIndex={0}
               onClick={() => onClaimClick(claim.elementId, claim.code)}
@@ -1982,7 +1997,11 @@ function LinkedClaimsSection({
                   onClaimClick(claim.elementId, claim.code);
                 }
               }}
-              className="cursor-pointer rounded-md border border-indigo-100 bg-white px-2.5 py-2 transition-colors hover:bg-indigo-50/60 focus:outline-none focus:ring-2 focus:ring-indigo-400/70"
+              className={cn(
+                "cursor-pointer rounded-md border border-indigo-100 bg-white px-2.5 py-2 transition-colors hover:bg-indigo-50/60 focus:outline-none focus:ring-2 focus:ring-indigo-400/70",
+                pingCode === claim.code &&
+                  "ring-2 ring-purple-500 border-purple-300 animate-[pulse_0.9s_ease-in-out_2]",
+              )}
             >
               <div className="flex items-center justify-between gap-2">
                 <span
